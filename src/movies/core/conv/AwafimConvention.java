@@ -41,7 +41,7 @@ public class AwafimConvention extends AbstractConvention {
         int season = Integer.parseInt(m.group(1));
         int episode = Integer.parseInt(m.group(2));
 
-        String title = stem.substring(0, m.start()).trim();
+        String title = trimSeparators(stem.substring(0, m.start()));
         String rest = stem.substring(m.end());
 
         // Everything after the marker: an episode title, optional "(Site)" and "(n)".
@@ -51,6 +51,8 @@ public class AwafimConvention extends AbstractConvention {
         if (episodeTitle.endsWith("-")) episodeTitle = episodeTitle.substring(0, episodeTitle.length() - 1).trim();
         if (title.isEmpty() || episodeTitle.isEmpty()) return null;
 
+        // A previously imdb-renamed file parses as "Show - SxxExx - Title";
+        // make sure no trailing separator sneaks into the show name.
         FileNameParts parts = baseParts(id(), fileName, ext);
         parts.setTitle(title);
         parts.setSeason(season);
@@ -67,8 +69,10 @@ public class AwafimConvention extends AbstractConvention {
     public String build(FileNameParts p) {
         StringBuilder sb = new StringBuilder();
         sb.append(p.getTitle()).append(' ')
-          .append('S').append(padded(p.getSeason())).append('E').append(padded(p.getEpisode()))
-          .append(" - ").append(p.getEpisodeTitle());
+          .append('S').append(padded(p.getSeason())).append('E').append(padded(p.getEpisode()));
+        if (!p.getEpisodeTitle().isEmpty()) {
+            sb.append(" - ").append(p.getEpisodeTitle());
+        }
         for (String tag : p.getTags()) sb.append(" (").append(tag).append(')');
         sb.append(p.getExtension());
         return sb.toString();

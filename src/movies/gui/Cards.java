@@ -8,6 +8,7 @@ import movies.core.RenameEngine;
 import movies.core.TransferAction;
 import movies.ops.EpisodeLister;
 import movies.ops.Flattener;
+import movies.ops.ImdbRename;
 import movies.ops.HealthCheck;
 import movies.ops.SubsMerger;
 import movies.ops.SubsShift;
@@ -45,9 +46,16 @@ final class Cards {
         private int row;
 
         JTextField addPathField(String label, boolean directory) {
+            return addPathField(label, directory, null);
+        }
+
+        JTextField addPathField(String label, boolean directory, String hint) {
             JTextField field = new JTextField(32);
             GuiUtil.enableFileDrop(field);
-            addRow(label, field, GuiUtil.browseButton(panel, field, directory));
+            JPanel right = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+            right.add(GuiUtil.browseButton(panel, field, directory));
+            if (hint != null) right.add(new JLabel(hint));
+            addRow(label, field, right);
             return field;
         }
 
@@ -213,12 +221,88 @@ final class Cards {
 
     }
 
+    // --------------------------------------------------------- imdb-rename
+
+    static final class ImdbCard extends PlanCard {
+        private final Form form = new Form();
+        private final JTextField dir = form.addPathField("Folder:", true, null);
+        private final JTextField titles = form.addPathField("Titles list:", false,
+                "default: titles.list in the folder");
+        private final JTextField show = form.addTextField("Show name (optional):", "default: detected from the files");
+        private final JTextField subs = form.addPathField("Subtitles folder:", true,
+                "optional; 'Subtitles' inside the folder is used when present");
+        private final JComboBox<String> style = new JComboBox<String>(new String[] { "S01E01", "1x01" });
+        private final JTextField tag = form.addTextField("Tag (optional):", "e.g. MVB.IMDB.en");
+        private final JTextField replaceWith = form.addTextField("Replace illegal chars with:", "blank = remove (?, : ...)");
+        private final JCheckBox recursive = form.addCheckbox("Scan video sub-folders", false);
+        private final JCheckBox overwrite = form.addCheckbox("Overwrite existing files", false);
+        private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
+        private final ImdbRename operation = new ImdbRename();
+        private volatile OperationResult lastResult;
+        private volatile Options lastOptions;
+
+        ImdbCard() {
+            super("IMDB rename", "Rename episodes to their IMDB titles from a titles list ('S1.E2 ∙ Title'), subtitles included.");
+        }
+
+        @Override
+        public JComponent component() {
+            return form.panel();
+        }
+
+        @Override
+        public void collect(Options options) {
+            options.setFolder(dir.getText().trim());
+            options.setTitlesFile(titles.getText().trim());
+            options.setShowName(show.getText().trim());
+            options.setSecondaryFolder(subs.getText().trim());
+            options.setStyle(style.getSelectedIndex() == 1 ? "1x01" : "s01e01");
+            options.setTag(tag.getText().trim());
+            options.setReplaceWith(replaceWith.getText().trim());
+            options.setRecursive(recursive.isSelected());
+            options.setOverwrite(overwrite.isSelected());
+            options.setDryRun(dryRun.isSelected());
+        }
+
+        @Override
+        public OperationResult run(Options options) {
+            lastPlanApplicable = false;
+            lastResult = null;
+            lastOptions = options;
+            OperationResult result = operation.plan(options);
+            long planned = 0;
+            for (TransferAction t : result.getTransfers()) {
+                if (t.state == TransferAction.State.PLANNED) planned++;
+            }
+            if (!options.isDryRun() && planned > 0 && result.errorCount() == 0) {
+                operation.apply(result, options);
+                lastPlanApplicable = false;
+            } else {
+                lastPlanApplicable = planned > 0 && result.errorCount() == 0;
+            }
+            return result;
+        }
+
+        @Override
+        public OperationResult apply() {
+            if (lastResult == null || lastOptions == null) {
+                OperationResult result = new OperationResult();
+                result.add(Problem.error("Run a dry run first."));
+                return result;
+            }
+            operation.apply(lastResult, lastOptions);
+            lastPlanApplicable = false;
+            return lastResult;
+        }
+    }
+
     // ----------------------------------------------------------- sync-subs
 
     static final class SyncCard extends PlanCard {
         private final Form form = new Form();
         private final JTextField videos = form.addPathField("Videos folder:", true);
-        private final JTextField subs = form.addPathField("Subtitles folder:", true);
+        private final JTextField subs = form.addPathField("Subtitles folder:", true,
+                "blank = 'Subtitles' inside the videos folder if present");
         private final JCheckBox recursive = form.addCheckbox("Scan sub-folders", true);
         private final JCheckBox move = form.addCheckbox("Move instead of copy", false);
         private final JCheckBox overwrite = form.addCheckbox("Overwrite existing subtitles", false);
@@ -501,6 +585,7 @@ final class Cards {
     static List<OpCard> all() {
         List<OpCard> cards = new ArrayList<OpCard>();
         cards.add(new RenameCard());
+        cards.add(new ImdbCard());
         cards.add(new SyncCard());
         cards.add(new FlattenCard());
         cards.add(new MergeCard());

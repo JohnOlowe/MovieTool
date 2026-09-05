@@ -68,7 +68,8 @@ public class TvSubtitlesConvention extends AbstractConvention {
     public String build(FileNameParts p) {
         StringBuilder sb = new StringBuilder();
         sb.append(p.getTitle()).append(" - ").append(p.getSeason()).append('x')
-          .append(padOrPlain(p.getEpisode())).append(" - ").append(p.getEpisodeTitle());
+          .append(padOrPlain(p.getEpisode()));
+        if (!p.getEpisodeTitle().isEmpty()) sb.append(" - ").append(p.getEpisodeTitle());
         for (String tag : p.getTags()) sb.append('.').append(tag);
         if (!p.getLanguage().isEmpty()) sb.append('.').append(p.getLanguage());
         sb.append(p.getExtension());

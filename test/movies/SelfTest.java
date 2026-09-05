@@ -7,9 +7,11 @@ import movies.core.OperationResult;
 import movies.core.Options;
 import movies.core.Problem;
 import movies.core.RenameEngine;
+import movies.core.NameSanitizer;
 import movies.core.TransferAction;
 import movies.ops.Flattener;
 import movies.ops.HealthCheck;
+import movies.ops.ImdbRename;
 import movies.ops.EpisodeLister;
 import movies.ops.SubsMerger;
 import movies.ops.SubsShift;
@@ -45,7 +47,9 @@ public final class SelfTest {
         testVttParsing();
         testMerge();
         testShift();
+        testSanitizer();
         testRename();
+        testImdbRename();
         testSync();
         testFlatten();
         testEpisodesAndCheck();
@@ -155,6 +159,10 @@ public final class SelfTest {
         parts = awafim.parse("The Flash S06E11 - Love is a Battlefield (Awafim.tv) (1).mp4");
         check("awafim duplicate marker", parts != null && parts.getEpisode() == 11
                 && parts.getTags().contains("Awafim.tv"));
+        parts = awafim.parse("Outer Banks - S01E01 - Pilot.mp4");
+        check("awafim reparses renamed", parts != null && parts.getTitle().equals("Outer Banks")
+                && parts.getSeason() == 1 && parts.getEpisode() == 1
+                && parts.getEpisodeTitle().equals("Pilot"));
 
         // Waploaded
         NamingConvention waploaded = registry.get("waploaded");
@@ -300,6 +308,71 @@ public final class SelfTest {
         check("rename collision kept original", new File(collisionDir, "A (sub2).mp4").exists());
     }
 
+    private static void testSanitizer() {
+        check("sanitize removes windows-illegal", NameSanitizer.sanitize("Trial: Two? Bro/E* \"X\"").equals("Trial Two BroE X"));
+        check("sanitize collapses spaces", NameSanitizer.sanitize("A: B? C").equals("A B C"));
+        check("sanitize trims trailing dot", NameSanitizer.sanitize("Title.").equals("Title"));
+        check("sanitize keeps legal", NameSanitizer.sanitize("P.O.W - 100%").equals("P.O.W - 100%"));
+        check("sanitize replacement", NameSanitizer.sanitize("What?:", "-").equals("What--"));
+        check("sanitize nbsp", NameSanitizer.sanitize("A\u00A0B").equals("A B"));
+    }
+
+    private static void testImdbRename() throws IOException {
+        File dir = tempDir("imdb");
+        touch(dir, "Outer_Banks_S01_E01.mp4");
+        touch(dir, "Outer_Banks_S01_E01_English.srt");
+        touch(dir, "Outer_Banks_S01_E02.mp4");
+        File subsFolder = mkdir(dir, "Subtitles");
+        File ep2 = mkdir(subsFolder, "Outer_Banks_S01_E02");
+        touch(ep2, "whatever.en.srt");
+        IoUtil.writeText(new File(dir, "titles.list"),
+                "Outer Banks (2020)\n"
+                + "TV Series\n"
+                + "S1.E1 \u2219 Pilot\n"
+                + "S1.E2 \u2219 Middle of Nowhere: Fun Bro?\n"
+                + "S1.E3 \u2219 Not downloaded yet\n");
+
+        Options options = options(dir.getAbsolutePath());
+        ImdbRename imdb = new ImdbRename();
+        OperationResult result = imdb.plan(options);
+        check("imdb planned count", planned(result) == 4);
+        check("imdb unmatched info", !result.problems().isEmpty());
+
+        imdb.apply(result, options);
+        check("imdb video renamed", new File(dir, "Outer Banks - S01E01 - Pilot.mp4").exists());
+        check("imdb sub renamed", new File(dir, "Outer Banks - S01E01 - Pilot.srt").exists());
+        check("imdb illegal chars removed", new File(dir, "Outer Banks - S01E02 - Middle of Nowhere Fun Bro.mp4").exists());
+        check("imdb sub moved out of Subtitles", new File(dir, "Outer Banks - S01E02 - Middle of Nowhere Fun Bro.srt").exists());
+        check("imdb originals gone", !new File(dir, "Outer_Banks_S01_E01.mp4").exists());
+
+        // Style and tag options on a fresh fixture.
+        File dir2 = tempDir("imdb2");
+        touch(dir2, "Show_1080P_S02_E05.mp4");
+        IoUtil.writeText(new File(dir2, "titles.list"), "S2.E5 \u2219 Hello: World?\n");
+        Options options2 = options(dir2.getAbsolutePath());
+        options2.setStyle("1x01");
+        options2.setTag("MVB.IMDB.en");
+        ImdbRename imdb2 = new ImdbRename();
+        OperationResult result2 = imdb2.plan(options2);
+        imdb2.apply(result2, options2);
+        check("imdb style 1x01 with tag", new File(dir2, "Show - 2x05 - Hello World.MVB.IMDB.en.mp4").exists());
+
+        // A raw episode line that cannot parse must warn, not abort.
+        File dir3 = tempDir("imdb3");
+        touch(dir3, "Show_720P_S01_E01.mp4");
+        IoUtil.writeText(new File(dir3, "titles.list"), "S1.E1 \u2219 Fine\n" + "S1 ∙ Broken\n" + "S1.E2 \u2219 Also fine\n");
+        Options options3 = options(dir3.getAbsolutePath());
+        ImdbRename imdb3 = new ImdbRename();
+        OperationResult result3 = imdb3.plan(options3);
+        boolean warned = false;
+        for (Problem p : result3.problems()) {
+            if (p.getSeverity() == Problem.Severity.WARN && p.getMessage().contains("Broken")) warned = true;
+        }
+        check("imdb broken line warns but continues", warned);
+        imdb3.apply(result3, options3);
+        check("imdb continues after bad line", new File(dir3, "Show - S01E01 - Fine.mp4").exists());
+    }
+
     private static void testSync() throws IOException {
         // Old workflow: episode folders with subs inside, videos beside them.
         File dir = tempDir("sync-folders");
@@ -340,6 +413,31 @@ public final class SelfTest {
         secondSync.apply(secondResult, cross);
         boolean suffixFound = new File(videos, "The Flash S04E05 - Girls Night Out (Awafim.tv) (2).srt").exists();
         check("sync second sub suffixed", suffixFound);
+
+        // A "Subtitles" folder inside the videos folder is picked up by default.
+        File withDefaults = tempDir("sync-default");
+        touch(withDefaults, "The Flash S04E05 - Girls Night Out (Awafim.tv).mp4");
+        File defaultSubs = mkdir(withDefaults, "Subtitles");
+        touch(defaultSubs, "The Flash 2014  - 4x05 - Girls Night Out.HDTV.en.srt");
+        Options defaultOptions = options(withDefaults.getAbsolutePath());
+        SubsSync defaultSync = new SubsSync();
+        OperationResult defaultResult = defaultSync.plan(defaultOptions);
+        check("sync subtitles folder default", planned(defaultResult) == 1);
+        defaultSync.apply(defaultResult, defaultOptions);
+        check("sync subtitles folder applied", new File(withDefaults,
+                "The Flash S04E05 - Girls Night Out (Awafim.tv).srt").exists());
+
+        // Renaming to a convention must not leave dangling " - " when the
+        // episode title is missing.
+        File guardDir = tempDir("rename-guard");
+        touch(guardDir, "The_Flash_1080P_S01_E01.mp4");
+        Options guardOptions = options(guardDir.getAbsolutePath());
+        RenameEngine guardEngine = new RenameEngine();
+        RenameEngine.RenamePlan guardPlan = guardEngine.plan(guardOptions, "awafim");
+        check("rename guard one action", guardPlan.renameCount() == 1);
+        check("rename guard no dangling dash", !guardPlan.actions().get(0).to.getName().contains(" - ."));
+        guardPlan.apply();
+        check("rename guard applied", new File(guardDir, "The_Flash S01E01.mp4").exists());
     }
 
     private static void testFlatten() throws IOException {

@@ -65,11 +65,22 @@ public class SubsSync {
             result.add(Problem.error("Videos folder is not a folder: " + options.getFolder()));
             return result;
         }
-        boolean sameTree = options.getSecondaryFolder().trim().isEmpty();
-        File subsRoot = sameTree ? videosRoot : new File(options.getSecondaryFolder());
+        // Subtitles no longer have to sit next to the videos: a "Subtitles"
+        // folder inside the videos folder is used automatically when present.
+        String subSpec = options.getSecondaryFolder().trim();
+        File subsRoot;
+        if (!subSpec.isEmpty()) {
+            subsRoot = new File(subSpec);
+        } else {
+            File defaultSubs = new File(videosRoot, "Subtitles");
+            subsRoot = defaultSubs.isDirectory() ? defaultSubs : videosRoot;
+        }
         if (!subsRoot.isDirectory()) {
-            result.add(Problem.error("Subtitles folder is not a folder: " + options.getSecondaryFolder()));
+            result.add(Problem.error("Subtitles folder is not a folder: " + subsRoot));
             return result;
+        }
+        if (!subsRoot.equals(videosRoot)) {
+            result.add(Problem.info("Subtitles source: " + subsRoot));
         }
 
         List<NamingConvention> selected = registry.selected(options.getConventions());

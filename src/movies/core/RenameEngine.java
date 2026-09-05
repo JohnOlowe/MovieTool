@@ -88,6 +88,15 @@ public class RenameEngine {
             String newName = options.hasPattern()
                     ? PatternBuilder.build(options.getPattern().trim(), parsed)
                     : target.build(parsed);
+            // Windows forbids ?: " \ / | < > * in names - a title carrying any
+            // of them used to make the old renamer fail silently. Sanitise here
+            // so every generated name is safe everywhere.
+            newName = NameSanitizer.sanitize(newName, options.getReplaceWith());
+            if (newName.isEmpty()) {
+                problems.add(Problem.warn("Name became empty after removing illegal characters, skipped: "
+                        + file.getName()));
+                continue;
+            }
             if (newName.equals(file.getName())) continue; // already conforming
             File targetFile = new File(file.getParentFile(), newName);
 

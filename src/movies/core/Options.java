@@ -54,6 +54,21 @@ public class Options {
     /** Emit a CSV file listing episodes instead of plain text. */
     private boolean csv;
 
+    /** Titles list for the IMDB rename (lines like "S1.E2 ∙ Title"). */
+    private String titlesFile = "";
+
+    /** Show name override for the IMDB rename (default: detected from files). */
+    private String showName = "";
+
+    /** Episode marker style for the IMDB rename: "s01e01" or "1x01". */
+    private String style = "s01e01";
+
+    /** Extra tag appended before the extension, e.g. "MVB.IMDB.en". */
+    private String tag = "";
+
+    /** What illegal file name characters are replaced with ("" = remove). */
+    private String replaceWith = "";
+
     /** How talky the console/log output should be (0 = quiet, 1 = normal, 2 = debug). */
     private int verbosity = 1;
 
@@ -101,6 +116,21 @@ public class Options {
 
     public boolean isCsv() { return csv; }
     public void setCsv(boolean csv) { this.csv = csv; }
+
+    public String getTitlesFile() { return titlesFile; }
+    public void setTitlesFile(String titlesFile) { this.titlesFile = titlesFile == null ? "" : titlesFile; }
+
+    public String getShowName() { return showName; }
+    public void setShowName(String showName) { this.showName = showName == null ? "" : showName; }
+
+    public String getStyle() { return style; }
+    public void setStyle(String style) { this.style = style == null ? "s01e01" : style; }
+
+    public String getTag() { return tag; }
+    public void setTag(String tag) { this.tag = tag == null ? "" : tag; }
+
+    public String getReplaceWith() { return replaceWith; }
+    public void setReplaceWith(String replaceWith) { this.replaceWith = replaceWith == null ? "" : replaceWith; }
 
     public int getVerbosity() { return verbosity; }
     public void setVerbosity(int verbosity) { this.verbosity = verbosity; }

@@ -8,6 +8,7 @@ import movies.core.RenameEngine;
 import movies.core.TransferAction;
 import movies.gui.MovieToolGui;
 import movies.ops.EpisodeLister;
+import movies.ops.ImdbRename;
 import movies.ops.Flattener;
 import movies.ops.HealthCheck;
 import movies.ops.SubsMerger;
@@ -48,6 +49,7 @@ public final class Cli {
     static {
         add(new HelpCommand());
         add(new RenameCommand());
+        add(new ImdbRenameCommand());
         add(new SyncSubsCommand());
         add(new FlattenCommand());
         add(new MergeSubsCommand());
@@ -251,6 +253,68 @@ public final class Cli {
         }
     }
 
+    private static class ImdbRenameCommand implements Command {
+        public String name() { return "imdb-rename"; }
+        public String summary() { return "Rename episodes to their IMDB titles from a titles list"; }
+        public String usage() {
+            return "Usage: movietool imdb-rename -d <folder> [--titles <file>] [options]\n"
+                    + "\nReads an episode list with lines like 'S1.E2 \u2219 Episode Title' (as copied\n"
+                    + "from IMDB or Netflix) and renames each episode's video and subtitle to\n"
+                    + "'<Show> - S01E02 - <Episode Title><ext>'. Characters Windows forbids\n"
+                    + "(?, :, \" ...) in titles are sanitised automatically. Dry-run by default.\n"
+                    + "  -d, --dir <folder>       Folder with the episode files\n"
+                    + "      --titles <file>      Titles list (default: <folder>/titles.list)\n"
+                    + "  -s, --subs <folder>      Extra subtitles folder (default: 'Subtitles'\n"
+                    + "                           inside --dir when present, else --dir itself)\n"
+                    + "       --show <name>       Override the show name (default: from the files)\n"
+                    + "       --style <style>     's01e01' (default) or '1x01'\n"
+                    + "       --tag <tags>        Tag appended before the extension, e.g. MVB.IMDB.en\n"
+                    + "       --replace-with <c>  Replace illegal characters with this (default: remove)\n"
+                    + "  -r, --recursive          Also scan video sub-folders\n"
+                    + "      --overwrite          Replace existing files\n"
+                    + "      --apply              Really rename (default is a dry run)\n"
+                    + "  -v, --verbose            Show every planned rename\n";
+        }
+        public int execute(String[] args) {
+            ArgParser argsParser = new ArgParser(args, aliases(), booleanFlags());
+            Options options = baseOptions(argsParser);
+            options.setSecondaryFolder(argsParser.joined("subs"));
+            options.setTitlesFile(argsParser.joined("titles"));
+            options.setShowName(argsParser.value("show", ""));
+            options.setTag(argsParser.joined("tag"));
+            options.setReplaceWith(argsParser.value("replace-with", ""));
+            String style = argsParser.value("style", "s01e01").trim();
+            String normalized = style.toLowerCase();
+            if (!(normalized.equals("s01e01") || normalized.equals("sxe") || normalized.equals("sxxexx")
+                    || normalized.equals("1x01") || normalized.equals("x") || normalized.equals("nxn"))) {
+                System.err.println("Unknown --style: " + style + " (use s01e01 or 1x01)");
+                return EXIT_USAGE;
+            }
+            options.setStyle(normalized);
+
+            ImdbRename operation = new ImdbRename();
+            OperationResult result = operation.plan(options);
+            if (options.getVerbosity() >= 1) {
+                for (TransferAction transfer : result.getTransfers()) {
+                    System.out.println("  " + transfer.state + ": " + transfer.from.getName()
+                            + "  ->  " + transfer.to.getName());
+                }
+            }
+            print(result, options);
+            if (!options.isApply()) {
+                System.out.println("Dry run; add --apply to rename the files.");
+                return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+            }
+            operation.apply(result, options);
+            int done = 0;
+            for (TransferAction t : result.getTransfers()) {
+                if (t.state == TransferAction.State.DONE) done++;
+            }
+            System.out.println(done + " rename(s) done.");
+            return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+        }
+    }
+
     private static class SyncSubsCommand implements Command {
         public String name() { return "sync-subs"; }
         public String summary() { return "Copy/move subtitles next to their matching videos"; }
@@ -259,7 +323,8 @@ public final class Cli {
                     + "\nMatches subtitles to videos (episode aware, any conventions) and copies\n"
                     + "each subtitle next to its video named exactly like the video. Dry-run by default.\n"
                     + "  -d, --dir <folder>       Videos folder\n"
-                    + "  -s, --subs <folder>      Subtitles folder (default: same as videos)\n"
+                    + "  -s, --subs <folder>      Subtitles folder (default: 'Subtitles' inside\n"
+                    + "                           --dir when present, else --dir itself)\n"
                     + "  -c, --conventions <ids>  Restrict auto-detection\n"
                     + "  -r, --recursive          Scan sub-folders (default: on for --subs, off for --dir)\n"
                     + "      --recursive-videos   Also scan video sub-folders\n"
@@ -510,6 +575,11 @@ public final class Cli {
         aliases.put("move", "--move,-m");
         aliases.put("csv", "--csv");
         aliases.put("seconds", "--seconds");
+        aliases.put("titles", "--titles");
+        aliases.put("show", "--show");
+        aliases.put("style", "--style");
+        aliases.put("tag", "--tag");
+        aliases.put("replace-with", "--replace-with");
         aliases.put("top", "--top");
         aliases.put("verbose", "--verbose,-v");
         aliases.put("quiet", "--quiet,-q");
