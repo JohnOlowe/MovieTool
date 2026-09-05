@@ -1,0 +1,7 @@
+# Build intermediates (the built jar at the repo root IS committed)
+build/
+*.class
+
+# OS noise
+.DS_Store
+Thumbs.db
