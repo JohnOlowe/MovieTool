@@ -106,12 +106,7 @@ case "$MODE" in
         ;;
 esac
 
-# ------------------------------------------------- 1. packages --------------
-log "installing dbus (session bus; librsvg is no longer needed - 2.44+ has no classic loaders)"
-install_packages "arch:dbus" "deb:dbus dbus-x11" || \
-    fail "package install failed; install 'dbus' manually"
-
-# ------------------------------------------------- 2. glycin configs --------
+# ------------------------------------------------- 1. glycin configs --------
 # Always present - hiding them leaves GTK with zero loaders on 2.44+.
 if glycin_conf_dir >/dev/null; then
     log "glycin loader configs: present"
@@ -127,7 +122,7 @@ else
     log "no glycin loader configs found - if SVG still fails, install the 'glycin-loaders' package"
 fi
 
-# ------------------------------------------------- 3. bwrap shim ------------
+# ------------------------------------------------- 2. bwrap shim ------------
 if bwrap_works; then
     log "bubblewrap probe: OK - glycin runs natively (recent proot, namespaces emulated)"
     if [ -e "$SHIM_PATH" ]; then
@@ -200,6 +195,11 @@ SHIM
         fail "shim did not take effect - check that PATH has /usr/local/bin before /usr/bin"
     fi
 fi
+
+# ------------------------------------------------- 3. packages --------------
+log "installing dbus (session bus; librsvg is no longer needed - 2.44+ has no classic loaders)"
+install_packages "arch:dbus" "deb:dbus dbus-x11" || \
+    fail "package install failed; install 'dbus' manually"
 
 # ------------------------------------------------- 4. verify ----------------
 log "verification:"

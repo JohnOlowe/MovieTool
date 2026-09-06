@@ -10,6 +10,12 @@
 log()  { printf '[fix] %s\n' "$*"; }
 fail() { printf '[fix] !! %s\n' "$*"; }
 
+# Normalise optional variables once: the caller runs under `set -u`, and a
+# single bare "$ROOT_DIR" aborted the whole fix (seen in the field: the
+# Include-layout mirror loop died with 'ROOT_DIR: unbound variable' before
+# the desktop crash could be fixed).
+ROOT_DIR="${ROOT_DIR:-}"
+
 # In ROOT_DIR test mode there is no real package manager to drive.
 in_test_mode() {
     [ -n "${ROOT_DIR:-}" ]
@@ -145,8 +151,8 @@ repair_arch_mirrors() {
         include="${line#*Include*=}"
         include="$(printf '%s' "$include" | tr -d ' ')"
         case "$include" in
-            /*) list="$ROOT_DIR$include" ;;
-            *)  list="${ROOT_DIR}/etc/pacman.d/$(basename "$include")" ;;
+            /*) list="${ROOT_DIR:-}$include" ;;
+            *)  list="${ROOT_DIR:-}/etc/pacman.d/$(basename "$include")" ;;
         esac
         if [ -f "$list" ] && grep -E "^[[:space:]]*Server *=" "$list" | grep -qv "archlinuxarm\.org"; then
             cp "$list" "$list.movietool.bak" 2>/dev/null || true
