@@ -219,21 +219,28 @@ scripts live in `scripts/`:
 
 ### XFCE aborts with "Gtk:ERROR ... image-missing.svg ... Bail out!"
 
-New gdk-pixbuf/GTK load SVGs through the sandboxed glycin loaders, which
-shell out to bubblewrap `--unshare-all`. proot has no Linux namespaces, so
-the loader dies and GTK treats one failed icon as fatal - the desktop never
-comes up. Fix (one-time):
+gdk-pixbuf 2.44+ / GTK load ALL images through the sandboxed glycin loaders,
+which shell out to bubblewrap `--unshare-all`. proot has no Linux namespaces
+(and older proot no mount emulation), so bwrap dies and GTK treats one failed
+icon as fatal - the desktop never comes up. Note: on 2.44+ there are no
+classic loaders to fall back to, so hiding glycin ("No image loaders are
+configured") or installing librsvg does NOT help.
+
+Fix (one-time):
 
 ```bash
 AUTO_FIX_DESKTOP=1 ./scripts/termux-session.sh
 ```
 
-It installs librsvg (classic in-process SVG loader) + dbus, disables the
-glycin loaders when bubblewrap cannot work, and wraps the session in
-dbus-launch with a private 0700 XDG_RUNTIME_DIR (Arch compiles out D-Bus
-autolaunch, and dbus rejects a world-writable /tmp). Also try
-`pkg upgrade proot` - newer proot fixes the namespace issue upstream
-(termux/proot#359), making the workaround unnecessary.
+It restores/keeps the glycin configs, probes bubblewrap and, while it is
+broken, installs a bwrap shim at `/usr/local/bin/bwrap` that execs the image
+loaders directly (unsandboxed - inside proot the sandbox adds nothing; the
+whole distro is a chroot). The real bwrap stays untouched at /usr/bin/bwrap,
+and once `pkg upgrade proot` lands the namespace fix (termux/proot#359), the
+next run detects native bwrap working and removes the shim automatically.
+The session is also wrapped in dbus-launch with a private 0700
+XDG_RUNTIME_DIR (Arch compiles out D-Bus autolaunch, and dbus rejects a
+world-writable /tmp).
 
 ### PortAudio apps show no devices ("Error recording 0 Success")
 
