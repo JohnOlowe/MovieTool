@@ -188,6 +188,33 @@ build.sh / build.bat   build scripts
 movietool.sh / movietool.bat  launchers
 ```
 
+## Running on Android (Termux + termux-x11)
+
+The phone setup this project was originally written on: Termux, the
+`termux-x11` app, and an Arch Linux proot distro running XFCE4. Two helper
+scripts live in `scripts/`:
+
+- **`termux-session.sh`** - the fixed launcher. Differences from the old
+  hand-rolled script: `PULSE_SERVER`, `DISPLAY` and `XDG_RUNTIME_DIR` are
+  passed *inside* the `su -` command (a login shell wipes the environment,
+  which was why the desktop had no sound), the PulseAudio TCP module is
+  loaded at daemon start instead of racing `pacmd`, the OpenSL ES playback
+  sink is verified, `onboard` starts inside the session, the X socket is
+  awaited instead of a blind `sleep`, and a wake lock keeps audio alive in
+  the background.
+
+  Audio path: `proot app -> PulseAudio TCP 127.0.0.1:4713 -> Termux
+  PulseAudio -> OpenSL ES -> Android audio stack -> speaker / headphones /
+  Bluetooth` - Android itself picks whichever hardware is connected, so no
+  extra binding is needed.
+
+- **`termux-audio-test.sh`** - run it in a terminal inside the XFCE session
+  to confirm sound reaches the phone (checks env, server, sinks and plays a
+  test tone).
+
+MovieTool itself runs fine in that session: install a JDK in the distro
+(`sudo pacman -S jdk8-openjdk`) and use `./movietool.sh` as on desktop.
+
 ## Troubleshooting
 
 - **"no Java runtime found"** — install Java 8+ or set `JAVA_HOME`.
