@@ -2,7 +2,7 @@
 # ============================================================================
 # termux-session.sh - Termux X11 + PulseAudio + proot XFCE4 launcher
 #
-# What was wrong with the previous version:
+# What was wrong with the original hand-rolled script:
 #
 #   1. NO AUDIO (the big one): the XFCE session was started with
 #          su - DJBeloved -c "env DISPLAY=:0 startxfce4"
@@ -20,7 +20,7 @@
 #
 #   3. `module-sles-source` is the MICROPHONE (capture only). Playback goes
 #      through the OpenSL ES sink that Termux PulseAudio ships. The script
-#      now makes sure a sink exists and reports it at startup.
+#      now makes sure a sink exists and reports sinks and sources.
 #
 #   4. `onboard` ran after `su -c "startxfce4"` returned - i.e. only after
 #      the desktop had been closed - and without DISPLAY, so it could never
@@ -28,19 +28,23 @@
 #
 #   5. `sleep 3` blind wait replaced by a poll for the real X socket.
 #
+# PortAudio apps (Audacity, ... - "Error recording 0 Success", empty device
+# lists): PortAudio's ALSA backend finds no cards inside proot because
+# Android does not expose /dev/snd. The ALSA -> PulseAudio bridge fixes that.
+# Run ONCE:
+#     AUTO_FIX_BRIDGE=1 ./scripts/termux-session.sh
+# Every start then verifies the bridge (see scripts/proot-audio-bridge.sh).
+#
 # How audio is "bound" to the phone hardware (nothing extra needed):
-#   proot app -> PulseAudio TCP 127.0.0.1:4713 -> Termux PulseAudio
+#   proot app -> (ALSA ->) PulseAudio TCP 127.0.0.1:4713 -> Termux PulseAudio
 #             -> OpenSL ES -> Android audio stack
 #             -> speaker / 3.5mm / Bluetooth / USB, whichever is connected.
 # Android picks the physical output; the session only has to reach the
-# Termux sound server, which the PULSE_SERVER fix handles.
+# Termux sound server.
 #
 # If apps randomly die (PulseAudio included) on Android 12+, that is the
 # phantom process killer, not this script. One-time fix via adb:
 #   adb shell settings put global settings_enable_monitor_phantom_procs false
-#   # or
-#   adb shell "/system/bin/device_config set_sync_disabled_for_tests persistent; \
-#              /system/bin/device_config put activity_manager max_phantom_processes 2147483647"
 #
 # Verify sound inside the XFCE session with scripts/termux-audio-test.sh
 # ============================================================================
@@ -56,9 +60,12 @@ BINDS=(
   "/storage/67FE-19FE:/storage/sdcard"
   "/storage/EBC3-7839:/storage/sdcard1"
 )
+# Set AUTO_FIX_BRIDGE=1 once to install the ALSA->PulseAudio bridge inside
+# the distro (needs network; installs alsa-plugins/libpulse via pacman/apt).
 # ----------------------------------------------------------------------------
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 export XDG_RUNTIME_DIR="${TMPDIR:-$PREFIX/tmp}"
 mkdir -p "$XDG_RUNTIME_DIR"
 
@@ -83,6 +90,41 @@ pactl load-module module-sles-sink 2>/dev/null || true
 
 echo "[audio] $(pactl info 2>/dev/null | grep -m1 'Default Sink' \
   || echo 'WARNING: no default sink found - check Termux pulseaudio')"
+pactl list short sources 2>/dev/null | while read -r _ name _; do
+  echo "[audio] source available: $name"
+done
+
+# ---- 1b. ALSA -> PulseAudio bridge inside the distro (PortAudio support) ---
+# The scripts folder is bound into the distro so the bridge can be checked
+# (and, with AUTO_FIX_BRIDGE=1, installed) before the desktop comes up.
+BIND_ARGS=()
+for bind in "${BINDS[@]}"; do
+  BIND_ARGS+=(--bind "${bind%%:*}:${bind#*:}")
+done
+if [ -d "$SCRIPT_DIR" ]; then
+  BINDS+=("$SCRIPT_DIR:/mnt/movietool-scripts")
+  BIND_ARGS+=(--bind "$SCRIPT_DIR:/mnt/movietool-scripts")
+fi
+BRIDGE="/mnt/movietool-scripts/proot-audio-bridge.sh"
+
+if [ "${AUTO_FIX_BRIDGE:-0}" = "1" ]; then
+  echo "[alsa] installing the ALSA->PulseAudio bridge inside '$PROOT_DISTRO' ..."
+  if proot-distro login "${BIND_ARGS[@]}" "$PROOT_DISTRO" --shared-tmp -- \
+       /bin/bash -c "bash $BRIDGE fix && touch /tmp/.movietool-bridge-ok"; then
+    echo "[alsa] bridge installed - PortAudio apps will list devices"
+  else
+    echo "[alsa] bridge install failed - PortAudio apps will still see no devices"
+  fi
+elif [ -f "$PREFIX/tmp/.movietool-bridge-ok" ]; then
+  echo "[alsa] bridge verified earlier this boot (remove $PREFIX/tmp/.movietool-bridge-ok to re-check)"
+elif proot-distro login "${BIND_ARGS[@]}" "$PROOT_DISTRO" --shared-tmp -- \
+       /bin/bash -c "bash $BRIDGE check" >/dev/null 2>&1; then
+  touch "$PREFIX/tmp/.movietool-bridge-ok" 2>/dev/null || true
+  echo "[alsa] bridge verified (PortAudio apps will list devices)"
+else
+  echo "[alsa] NOTE: PortAudio apps (Audacity etc.) will show NO devices yet."
+  echo "[alsa]       Fix once with:  AUTO_FIX_BRIDGE=1 $SCRIPT_DIR/termux-session.sh"
+fi
 
 # ---- 2. termux-x11 ----------------------------------------------------------
 am force-stop com.termux.x11 2>/dev/null || true
@@ -116,11 +158,6 @@ sleep 1
 # PULSE_SERVER / DISPLAY / XDG_RUNTIME_DIR are exported INSIDE the su'd shell
 # because `su -` would otherwise throw them away (this is the audio fix).
 # `onboard` starts in the background before startxfce4 takes over the shell.
-BIND_ARGS=()
-for bind in "${BINDS[@]}"; do
-  BIND_ARGS+=(--bind "${bind%%:*}:${bind#*:}")
-done
-
 INNER="su - ${PROOT_USER} -c 'env DISPLAY=${DISPLAY_NO} PULSE_SERVER=127.0.0.1 XDG_RUNTIME_DIR=/tmp sh -c \"onboard & exec startxfce4\"'"
 
 proot-distro login "${BIND_ARGS[@]}" "$PROOT_DISTRO" --shared-tmp -- /bin/bash -c "$INNER"

@@ -208,9 +208,38 @@ scripts live in `scripts/`:
   Bluetooth` - Android itself picks whichever hardware is connected, so no
   extra binding is needed.
 
-- **`termux-audio-test.sh`** - run it in a terminal inside the XFCE session
-  to confirm sound reaches the phone (checks env, server, sinks and plays a
-  test tone).
+- **`proot-audio-bridge.sh`** - the PortAudio fix, run as root inside the
+  distro (see below).
+- **`termux-audio-test.sh`** - run it in a terminal inside the XFCE session;
+  it checks the whole path layer by layer (server, sinks, ALSA bridge, a
+  3 second microphone round trip) and plays the recording back.
+
+### PortAudio apps show no devices ("Error recording 0 Success")
+
+Apps that use PortAudio (Audacity's bundled V19.7.0-devel, and most Linux
+recording apps) talk to ALSA on Linux - the release has no PulseAudio
+backend. Inside proot there are no ALSA cards at all (Android does not
+expose `/dev/snd` to apps), so the device lists come back empty and the app
+fails with the text of error code 0 - `paNoError`, printed as "Success" -
+which really means "no usable device found".
+
+The fix routes ALSA's default device to the PulseAudio server in Termux
+(ALSA -> libpulse -> TCP -> OpenSL ES -> phone hardware):
+
+```bash
+AUTO_FIX_BRIDGE=1 ./scripts/termux-session.sh    # run once; installs the
+                                                 # bridge inside the distro
+```
+
+After that PortAudio lists the `default` and `pulse` devices for both
+playback and recording - pick those in the app (in Audacity: Audio Host
+ALSA, devices `default`/`pulse`). Every later session start re-verifies the
+bridge automatically. The microphone additionally needs
+`pactl load-module module-sles-source` on the Termux side (the launcher does
+it) and Android's microphone permission for Termux; Android 12+ users may
+also need the phantom process killer exemption noted in the launcher. If an
+app runs in Termux itself (outside the proot distro) it has the same empty
+PortAudio problem - run it inside the XFCE session instead.
 
 MovieTool itself runs fine in that session: install a JDK in the distro
 (`sudo pacman -S jdk8-openjdk`) and use `./movietool.sh` as on desktop.
