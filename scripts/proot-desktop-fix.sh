@@ -52,9 +52,19 @@ bwrap_works() {
         [ -e "$R/usr/local/bin/bwrap" ]
         return
     fi
+    # Field lesson: non-login shells (proot-distro login ... -c) can lack
+    # /usr/local/bin in PATH, which made the probe falsely report "shim did
+    # not take effect" while the desktop - launched with the normal PATH -
+    # used the shim just fine. Probe with the standard Arch PATH.
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/bin:/bin"
+    export PATH
     command -v bwrap >/dev/null 2>&1 || return 1
+    if [ "$(command -v bwrap)" = "/usr/local/bin/bwrap" ]; then
+        return 0   # our shim: works by construction
+    fi
     bwrap --unshare-all --ro-bind / / /bin/true >/dev/null 2>&1
 }
+
 
 
 # Path of the glycin loader configuration (glob: the compat version segment

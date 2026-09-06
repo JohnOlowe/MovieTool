@@ -274,6 +274,34 @@ also need the phantom process killer exemption noted in the launcher. If an
 app runs in Termux itself (outside the proot distro) it has the same empty
 PortAudio problem - run it inside the XFCE session instead.
 
+### Switching microphones (built-in vs USB)
+
+Audio flows through the phone's PulseAudio, so device control is `pactl`
+control - `scripts/termux-audio-devices.sh` wraps it (works both on the
+Termux side and inside the session):
+
+```bash
+scripts/termux-audio-devices.sh list        # see sinks (outputs) + sources (inputs)
+scripts/termux-audio-devices.sh mic 2       # make source #2 the default input
+scripts/termux-audio-devices.sh out 1       # switch output
+scripts/termux-audio-devices.sh alsa-sync   # expose every source/sink as its
+                                            # own ALSA device for Audacity
+```
+
+How USB mics behave here: Termux's PulseAudio captures through Android's
+OpenSL ES API, which follows Android's routing. Usually there is ONE source
+(`OpenSL_ES_source`) and Android picks the hardware: plug a USB mic in (OTG)
+and most Android versions switch the input to it automatically - unplug to
+revert. If a second source appears in `list`, `mic 2` selects it. Inside the
+desktop, `pavucontrol` (`sudo pacman -S pavucontrol`) additionally lets you
+choose the device per application while recording, and `alsa-sync` makes
+per-device entries (`mic_opensl_es_source_2 [mic]` ...) appear next to
+`default` in Audacity's device lists.
+
+Note: the ALSA "cannot find card '0'" spam Audacity prints while scanning is
+harmless - those probes are supposed to fail inside proot and fall through
+to the `pulse` device.
+
 MovieTool itself runs fine in that session: install a JDK in the distro
 (`sudo pacman -S jdk8-openjdk`) and use `./movietool.sh` as on desktop.
 
