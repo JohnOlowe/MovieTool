@@ -210,9 +210,30 @@ scripts live in `scripts/`:
 
 - **`proot-audio-bridge.sh`** - the PortAudio fix, run as root inside the
   distro (see below).
+- **`proot-desktop-fix.sh`** - the XFCE/GTK crash fix (see below).
+- **`proot-lib.sh`** - shared helpers (pacman with full-upgrade + mirror
+  repair) used by both fix scripts.
 - **`termux-audio-test.sh`** - run it in a terminal inside the XFCE session;
   it checks the whole path layer by layer (server, sinks, ALSA bridge, a
   3 second microphone round trip) and plays the recording back.
+
+### XFCE aborts with "Gtk:ERROR ... image-missing.svg ... Bail out!"
+
+New gdk-pixbuf/GTK load SVGs through the sandboxed glycin loaders, which
+shell out to bubblewrap `--unshare-all`. proot has no Linux namespaces, so
+the loader dies and GTK treats one failed icon as fatal - the desktop never
+comes up. Fix (one-time):
+
+```bash
+AUTO_FIX_DESKTOP=1 ./scripts/termux-session.sh
+```
+
+It installs librsvg (classic in-process SVG loader) + dbus, disables the
+glycin loaders when bubblewrap cannot work, and wraps the session in
+dbus-launch with a private 0700 XDG_RUNTIME_DIR (Arch compiles out D-Bus
+autolaunch, and dbus rejects a world-writable /tmp). Also try
+`pkg upgrade proot` - newer proot fixes the namespace issue upstream
+(termux/proot#359), making the workaround unnecessary.
 
 ### PortAudio apps show no devices ("Error recording 0 Success")
 
@@ -227,8 +248,8 @@ The fix routes ALSA's default device to the PulseAudio server in Termux
 (ALSA -> libpulse -> TCP -> OpenSL ES -> phone hardware):
 
 ```bash
-AUTO_FIX_BRIDGE=1 ./scripts/termux-session.sh    # run once; installs the
-                                                 # bridge inside the distro
+AUTO_FIX=1 ./scripts/termux-session.sh    # run once; installs the audio
+                                          # AND desktop fixes in one go
 ```
 
 After that PortAudio lists the `default` and `pulse` devices for both

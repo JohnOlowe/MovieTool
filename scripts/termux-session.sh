@@ -2,45 +2,42 @@
 # ============================================================================
 # termux-session.sh - Termux X11 + PulseAudio + proot XFCE4 launcher
 #
-# What was wrong with the original hand-rolled script:
+# Fixes over the original hand-rolled script, in the order they bite:
 #
-#   1. NO AUDIO (the big one): the XFCE session was started with
-#          su - DJBeloved -c "env DISPLAY=:0 startxfce4"
-#      `su -` starts a LOGIN shell and wipes nearly the whole inherited
-#      environment, so the PULSE_SERVER=127.0.0.1 exported a line earlier
-#      never reached XFCE or anything it launched. Every app then looked
-#      for a PulseAudio socket the session could not use -> silence.
-#      DISPLAY had exactly the same problem (which is why the old script
-#      re-set it with `env`) - PULSE_SERVER needed the same treatment.
+#   1. NO AUDIO: `su -` starts a login shell and wipes the environment, so
+#      the PULSE_SERVER=127.0.0.1 exported before it never reached XFCE.
+#      PULSE_SERVER / DISPLAY / XDG_RUNTIME_DIR are now set INSIDE the
+#      session (DISPLAY had the same problem - the old script re-set it
+#      with `env` while PULSE_SERVER was left behind).
 #
-#   2. The TCP module was loaded with `pacmd` right after `pulseaudio
-#      --start`. That is a race: the daemon is not always ready to accept
-#      pacmd yet, and the module silently ends up unloaded. It is now
-#      passed to the daemon itself with --load.
+#   2. The PulseAudio TCP module is passed to the daemon with --load
+#      instead of racing `pacmd` right after --start.
 #
-#   3. `module-sles-source` is the MICROPHONE (capture only). Playback goes
-#      through the OpenSL ES sink that Termux PulseAudio ships. The script
-#      now makes sure a sink exists and reports sinks and sources.
+#   3. module-sles-source is the MICROPHONE. The launcher also sets it (not
+#      the OpenSL_ES_sink.monitor output monitor) as the DEFAULT SOURCE,
+#      otherwise recording apps capture playback/silence.
 #
-#   4. `onboard` ran after `su -c "startxfce4"` returned - i.e. only after
-#      the desktop had been closed - and without DISPLAY, so it could never
-#      appear. It now starts inside the session, before the desktop.
+#   4. D-Bus session bus: Arch compiles out D-Bus autolaunch ("Using X11
+#      for dbus-daemon autolaunch was disabled at compile time") so nothing
+#      created a session bus and XFCE's startup all failed. The session is
+#      now wrapped in dbus-launch.
 #
-#   5. `sleep 3` blind wait replaced by a poll for the real X socket.
+#   5. XDG_RUNTIME_DIR must NOT be /tmp (mode 041777 - dbus refuses it:
+#      'can be written by others'). A private 0700 directory is created.
 #
-# PortAudio apps (Audacity, ... - "Error recording 0 Success", empty device
-# lists): PortAudio's ALSA backend finds no cards inside proot because
-# Android does not expose /dev/snd. The ALSA -> PulseAudio bridge fixes that.
-# Run ONCE:
-#     AUTO_FIX_BRIDGE=1 ./scripts/termux-session.sh
-# Every start then verifies the bridge (see scripts/proot-audio-bridge.sh).
+#   6. X socket is awaited (no blind sleep), wake lock held, onboard is
+#      started inside the session with a display.
 #
-# How audio is "bound" to the phone hardware (nothing extra needed):
-#   proot app -> (ALSA ->) PulseAudio TCP 127.0.0.1:4713 -> Termux PulseAudio
-#             -> OpenSL ES -> Android audio stack
-#             -> speaker / 3.5mm / Bluetooth / USB, whichever is connected.
-# Android picks the physical output; the session only has to reach the
-# Termux sound server.
+#   7. Bind sources that do not exist (e.g. an unmounted SD card) are
+#      skipped with a warning instead of proot erroring on them.
+#
+# PortAudio apps (Audacity, ...) seeing NO devices / "Error recording 0":
+#   run once:  AUTO_FIX_BRIDGE=1 ./scripts/termux-session.sh
+# XFCE aborting with 'Gtk:ERROR ... image-missing.svg ... Bail out!':
+#   run once:  AUTO_FIX_DESKTOP=1 ./scripts/termux-session.sh
+#   (or just:  AUTO_FIX=1 ...  for both; and try `pkg upgrade proot` in
+#   Termux - newer proot fixes the bwrap/namespace issue upstream.)
+# Every start re-verifies both fixes (cached per boot when OK).
 #
 # If apps randomly die (PulseAudio included) on Android 12+, that is the
 # phantom process killer, not this script. One-time fix via adb:
@@ -60,14 +57,19 @@ BINDS=(
   "/storage/67FE-19FE:/storage/sdcard"
   "/storage/EBC3-7839:/storage/sdcard1"
 )
-# Set AUTO_FIX_BRIDGE=1 once to install the ALSA->PulseAudio bridge inside
-# the distro (needs network; installs alsa-plugins/libpulse via pacman/apt).
+# AUTO_FIX=1 fixes everything at once; AUTO_FIX_BRIDGE=1 / AUTO_FIX_DESKTOP=1
+# target the audio / desktop fixes individually.
 # ----------------------------------------------------------------------------
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 export XDG_RUNTIME_DIR="${TMPDIR:-$PREFIX/tmp}"
 mkdir -p "$XDG_RUNTIME_DIR"
+RUNTIME_DIR_IN_DISTRO="/tmp/xdg-${PROOT_USER}"
+
+fix_requested() {
+    [ "${AUTO_FIX:-0}" = "1" ] || [ "${!1:-0}" = "1" ]
+}
 
 # Keep the device awake so PulseAudio is not frozen while backgrounded.
 termux-wake-lock 2>/dev/null || true
@@ -104,20 +106,27 @@ else
   echo "[audio]   2. Termux:  pactl load-module module-sles-source   (see any error?)"
 fi
 
-# ---- 1b. ALSA -> PulseAudio bridge inside the distro (PortAudio support) ---
-# The scripts folder is bound into the distro so the bridge can be checked
-# (and, with AUTO_FIX_BRIDGE=1, installed) before the desktop comes up.
+# ---- 2. proot binds ---------------------------------------------------------
+# Missing sources (unmounted SD card etc.) are skipped: proot would warn on
+# every single one and the card can simply be remounted later.
 BIND_ARGS=()
 for bind in "${BINDS[@]}"; do
-  BIND_ARGS+=(--bind "${bind%%:*}:${bind#*:}")
+  src="${bind%%:*}"
+  dst="${bind#*:}"
+  if [ -e "$src" ]; then
+    BIND_ARGS+=(--bind "$src:$dst")
+  else
+    echo "[bind] WARNING: $src does not exist right now - skipping (remount the storage and restart to include it)"
+  fi
 done
 if [ -d "$SCRIPT_DIR" ]; then
-  BINDS+=("$SCRIPT_DIR:/mnt/movietool-scripts")
   BIND_ARGS+=(--bind "$SCRIPT_DIR:/mnt/movietool-scripts")
 fi
 BRIDGE="/mnt/movietool-scripts/proot-audio-bridge.sh"
+DESKTOP_FIX="/mnt/movietool-scripts/proot-desktop-fix.sh"
 
-if [ "${AUTO_FIX_BRIDGE:-0}" = "1" ]; then
+# ---- 3. one-time fixes, verified on every start ----------------------------
+if fix_requested AUTO_FIX_BRIDGE; then
   echo "[alsa] installing the ALSA->PulseAudio bridge inside '$PROOT_DISTRO' ..."
   if proot-distro login "${BIND_ARGS[@]}" "$PROOT_DISTRO" --shared-tmp -- \
        /bin/bash -c "bash $BRIDGE fix && touch /tmp/.movietool-bridge-ok"; then
@@ -136,7 +145,27 @@ else
   echo "[alsa]       Fix once with:  AUTO_FIX_BRIDGE=1 $SCRIPT_DIR/termux-session.sh"
 fi
 
-# ---- 2. termux-x11 ----------------------------------------------------------
+if fix_requested AUTO_FIX_DESKTOP; then
+  echo "[gtk] installing the desktop fix (SVG loader + D-Bus) inside '$PROOT_DISTRO' ..."
+  if proot-distro login "${BIND_ARGS[@]}" "$PROOT_DISTRO" --shared-tmp -- \
+       /bin/bash -c "bash $DESKTOP_FIX fix && touch /tmp/.movietool-desktop-ok"; then
+    echo "[gtk] desktop fix installed - XFCE will start"
+  else
+    echo "[gtk] desktop fix incomplete - XFCE may still abort on icons"
+  fi
+elif [ -f "$PREFIX/tmp/.movietool-desktop-ok" ]; then
+  echo "[gtk] desktop fix verified earlier this boot (remove $PREFIX/tmp/.movietool-desktop-ok to re-check)"
+elif proot-distro login "${BIND_ARGS[@]}" "$PROOT_DISTRO" --shared-tmp -- \
+       /bin/bash -c "bash $DESKTOP_FIX check" >/dev/null 2>&1; then
+  touch "$PREFIX/tmp/.movietool-desktop-ok" 2>/dev/null || true
+  echo "[gtk] desktop verified (SVG loading + D-Bus OK)"
+else
+  echo "[gtk] NOTE: XFCE will likely abort ('Gtk:ERROR ... image-missing.svg')."
+  echo "[gtk]       Fix once with:  AUTO_FIX_DESKTOP=1 $SCRIPT_DIR/termux-session.sh"
+  echo "[gtk]       Or upgrade proot:  pkg upgrade proot"
+fi
+
+# ---- 4. termux-x11 ----------------------------------------------------------
 am force-stop com.termux.x11 2>/dev/null || true
 # Pattern includes ":0" so it can never match this script's own name.
 pkill -9 -f "termux-x11 :0" 2>/dev/null || true
@@ -164,11 +193,14 @@ fi
 am start --user 0 -n com.termux.x11/com.termux.x11.MainActivity >/dev/null 2>&1 || true
 sleep 1
 
-# ---- 3. The proot session ---------------------------------------------------
-# PULSE_SERVER / DISPLAY / XDG_RUNTIME_DIR are exported INSIDE the su'd shell
-# because `su -` would otherwise throw them away (this is the audio fix).
-# `onboard` starts in the background before startxfce4 takes over the shell.
-INNER="su - ${PROOT_USER} -c 'env DISPLAY=${DISPLAY_NO} PULSE_SERVER=127.0.0.1 XDG_RUNTIME_DIR=/tmp sh -c \"onboard & exec startxfce4\"'"
+# ---- 5. The proot session ---------------------------------------------------
+# The /tmp of the distro is --shared-tmp (world-writable), which dbus rejects
+# as XDG_RUNTIME_DIR ('can be written by others (mode 041777)'). A private
+# 0700 directory is created instead, and the whole session is wrapped in
+# dbus-launch because Arch compiles out D-Bus autolaunch.
+rm -rf "${TMPDIR:-$PREFIX/tmp}/xdg-${PROOT_USER}" 2>/dev/null || true
+
+INNER="su - ${PROOT_USER} -c \"XDG_RUNTIME_DIR=${RUNTIME_DIR_IN_DISTRO} PULSE_SERVER=127.0.0.1 DISPLAY=${DISPLAY_NO} sh -c 'mkdir -p ${RUNTIME_DIR_IN_DISTRO} && chmod 700 ${RUNTIME_DIR_IN_DISTRO} && export XDG_RUNTIME_DIR PULSE_SERVER DISPLAY && exec dbus-launch --exit-with-session sh -c \\\"onboard >/dev/null 2>&1 & exec startxfce4\\\"'\""
 
 proot-distro login "${BIND_ARGS[@]}" "$PROOT_DISTRO" --shared-tmp -- /bin/bash -c "$INNER"
 
