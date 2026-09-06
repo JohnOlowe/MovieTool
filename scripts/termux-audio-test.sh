@@ -61,9 +61,24 @@ fi
 
 echo "== 4. microphone round trip (3 seconds) =="
 if command -v parecord >/dev/null 2>&1 && command -v paplay >/dev/null 2>&1; then
-  pactl list short sources 2>/dev/null | while IFS='	' read -r _ name _; do
-    echo "  source: $name"
-  done
+  if ! pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/' | grep -q .; then
+    echo "  !! only output monitors exist as sources - there is no microphone."
+    echo "     Checklist:"
+    echo "     1. Android: Settings > Apps > Termux > Permissions > Microphone = allow"
+    echo "     2. Termux side:  pactl load-module module-sles-source"
+    echo "     3. Restart the session (it then sets the mic as the default source)"
+    fail=1
+  fi
+  default_source="$(pactl info 2>/dev/null | awk '/Default Source/ { print $3 }')"
+  echo "  default source: $default_source"
+  case "$default_source" in
+    *.monitor)
+      echo "  !! the default source is an output monitor, not the microphone."
+      echo "     Recording apps will capture playback instead of the mic."
+      echo "     Restart the session; it runs:  pactl set-default-source <mic>"
+      fail=1
+      ;;
+  esac
   echo "  recording 3 s - say something ..."
   rm -f /tmp/movietool-mic-test.wav
   timeout 4 parecord --file-format=wav /tmp/movietool-mic-test.wav 2>/dev/null || true

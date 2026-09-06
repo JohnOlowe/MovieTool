@@ -234,9 +234,14 @@ AUTO_FIX_BRIDGE=1 ./scripts/termux-session.sh    # run once; installs the
 After that PortAudio lists the `default` and `pulse` devices for both
 playback and recording - pick those in the app (in Audacity: Audio Host
 ALSA, devices `default`/`pulse`). Every later session start re-verifies the
-bridge automatically. The microphone additionally needs
+bridge automatically. If pacman reports 404s or "conflicting files"
+(libgcc/gcc-libs), the bridge script repairs the mirrors (your distro is
+Arch Linux ARM - mainline x86_64 mirrors 404 on its repos) and installs
+with a full `-Syu` upgrade in the same transaction; partial upgrades are
+what cause the libgcc conflict. The microphone additionally needs
 `pactl load-module module-sles-source` on the Termux side (the launcher does
-it) and Android's microphone permission for Termux; Android 12+ users may
+it and also sets the mic - not the output monitor - as the default source)
+and Android's microphone permission for Termux; Android 12+ users may
 also need the phantom process killer exemption noted in the launcher. If an
 app runs in Termux itself (outside the proot distro) it has the same empty
 PortAudio problem - run it inside the XFCE session instead.

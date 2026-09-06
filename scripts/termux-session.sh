@@ -90,9 +90,19 @@ pactl load-module module-sles-sink 2>/dev/null || true
 
 echo "[audio] $(pactl info 2>/dev/null | grep -m1 'Default Sink' \
   || echo 'WARNING: no default sink found - check Termux pulseaudio')"
-pactl list short sources 2>/dev/null | while read -r _ name _; do
-  echo "[audio] source available: $name"
-done
+
+# Make the real microphone the default source. Without this the default
+# source is OpenSL_ES_sink.monitor - the OUTPUT monitor - and every recording
+# app silently captures playback (or silence) instead of the mic.
+MIC="$(pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')"
+if [ -n "$MIC" ]; then
+  pactl set-default-source "$MIC" 2>/dev/null || true
+  echo "[audio] microphone ready: $MIC"
+else
+  echo "[audio] WARNING: no microphone source (only output monitors exist)."
+  echo "[audio]   1. Android: Settings > Apps > Termux > Permissions > Microphone = allow"
+  echo "[audio]   2. Termux:  pactl load-module module-sles-source   (see any error?)"
+fi
 
 # ---- 1b. ALSA -> PulseAudio bridge inside the distro (PortAudio support) ---
 # The scripts folder is bound into the distro so the bridge can be checked

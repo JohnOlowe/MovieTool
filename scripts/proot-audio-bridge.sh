@@ -13,6 +13,18 @@
 #   does: ALSA default -> libpulse -> TCP 127.0.0.1 -> Termux PulseAudio
 #   -> OpenSL ES -> phone hardware (speaker, headphones, BT) and microphone.
 #
+# FIELD NOTES (from a real Arch Linux ARM install, 2026-09):
+#   * "error: failed to commit transaction (conflicting files) libgcc:
+#     /usr/lib/libgcc_s.so exists in filesystem (owned by gcc-libs)"
+#     -> caused by a PARTIAL upgrade ('pacman -Sy pkg' without -u) after the
+#     gcc-libs/libgcc split. Fixed here by installing with -Syu (full system
+#     upgrade in the same transaction), plus a targeted --overwrite retry as
+#     an explicitly-labelled last resort.
+#   * "failed retrieving file 'core.db' from mirror.osbeck.com : 404"
+#     -> osbeck is a mainline x86_64 mirror; Arch Linux ARM (repos core,
+#     extra, alarm, aur) needs mirror.archlinuxarm.org. Detected and repaired
+#     automatically (your pacman.conf is backed up first).
+#
 # RUN AS ROOT INSIDE THE DISTRO. Easiest through the session launcher:
 #     AUTO_FIX_BRIDGE=1 ./scripts/termux-session.sh      (run once)
 # which binds this folder to /mnt/movietool-scripts inside the distro.
@@ -58,6 +70,58 @@ pactl_works() {
     PULSE_SERVER="${PULSE_SERVER:-127.0.0.1}" pactl info >/dev/null 2>&1
 }
 
+# --- pacman_install begin (extracted verbatim by the test harness) ----------
+# Full-upgrade install. Never 'pacman -Sy pkg': partial upgrades are what
+# produced the "libgcc ... owned by gcc-libs" commit failure.
+pacman_install() {
+    local pkglog
+    pkglog="$(mktemp "${TMPDIR:-/tmp}/movietool-pacman.XXXXXX")"
+    log "running: pacman -Syu --needed --noconfirm $*"
+    log "(this upgrades the whole system first - required, partial upgrades break Arch)"
+    pacman -Syu --needed --noconfirm "$@" 2>&1 | tee "$pkglog"
+    if [ "${PIPESTATUS[0]}" -eq 0 ]; then
+        rm -f "$pkglog"
+        return 0
+    fi
+    if grep -q "exists in filesystem" "$pkglog"; then
+        local -a overwrites=()
+        local p
+        while IFS= read -r p; do
+            overwrites+=("--overwrite=$p")
+        done < <(awk '/exists in filesystem/ {print $2}' "$pkglog" | sort -u)
+        if [ "${#overwrites[@]}" -gt 0 ]; then
+            fail "conflicting files; retrying with --overwrite (last resort):"
+            for p in "${overwrites[@]}"; do fail "    $p"; done
+            pacman -Syu --needed --noconfirm "${overwrites[@]}" "$@" 2>&1 | tee -a "$pkglog"
+            if [ "${PIPESTATUS[0]}" -eq 0 ]; then
+                rm -f "$pkglog"
+                return 0
+            fi
+        fi
+    fi
+    fail "pacman output (last lines):"
+    tail -15 "$pkglog" | sed 's/^/[bridge]     /'
+    rm -f "$pkglog"
+    return 1
+}
+# --- pacman_install end -----------------------------------------------------
+
+# Point pacman back at the Arch Linux ARM mirrors. osbeck.com & co. are
+# mainline x86_64 mirrors and 404 on the ARM repos (core/extra/alarm/aur).
+repair_arch_mirrors() {
+    local conf="$R/etc/pacman.conf"
+    [ -f "$conf" ] || return 0
+    grep -q "^\[alarm\]" "$conf" || return 0   # only Arch Linux ARM has this repo
+    if grep -E "^Server *=" "$conf" | grep -qv "archlinuxarm\.org"; then
+        cp "$conf" "$conf.movietool.bak" 2>/dev/null || true
+        awk '/^Server *=/ { print "Server = https://mirror.archlinuxarm.org/$arch/$repo"; next } { print }' \
+            "$conf" > "$conf.tmp" && mv "$conf.tmp" "$conf"
+        log "pacman mirrors repaired -> mirror.archlinuxarm.org (backup: pacman.conf.movietool.bak)"
+        log "the previous mirror 404'd on every database (it is not an ARM mirror)"
+    fi
+    return 0
+}
+
 case "$MODE" in
     check)
         if asound_ok && pactl_works; then
@@ -81,9 +145,16 @@ if [ -n "$R" ]; then
     log "ROOT_DIR test mode: skipping package installation"
 elif command -v pacman >/dev/null 2>&1; then
     log "installing: alsa-lib alsa-plugins libpulse alsa-utils pulseaudio (Arch)"
-    if ! pacman -Sy --needed --noconfirm alsa-lib alsa-plugins libpulse alsa-utils pulseaudio >/dev/null 2>&1; then
-        pacman -Sy --needed --noconfirm alsa-lib alsa-plugins libpulse alsa-utils pulseaudio || \
-            fail "pacman failed - install the packages above manually"
+    repair_arch_mirrors
+    if pacman_install alsa-lib alsa-plugins libpulse alsa-utils pulseaudio; then
+        log "packages installed"
+    else
+        fail "automatic install failed. Manual fix inside the distro:"
+        if [ -f /etc/pacman.conf ] && grep -q "^\[alarm\]" /etc/pacman.conf; then
+            fail "  sudo sed -i 's|^Server.*|Server=https://mirror.archlinuxarm.org/\$arch/\$repo|' /etc/pacman.conf"
+        fi
+        fail "  sudo pacman -Syu"
+        fail "  sudo pacman -S alsa-lib alsa-plugins libpulse alsa-utils pulseaudio"
     fi
 elif command -v apt-get >/dev/null 2>&1; then
     log "installing: libasound2-plugins pulseaudio-utils alsa-utils (Debian/Ubuntu)"
