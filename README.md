@@ -232,13 +232,14 @@ Fix (one-time):
 AUTO_FIX_DESKTOP=1 ./scripts/termux-session.sh
 ```
 
-It restores/keeps the glycin configs, probes bubblewrap and, while it is
-broken, installs a bwrap shim at `/usr/local/bin/bwrap` that execs the image
-loaders directly (unsandboxed - inside proot the sandbox adds nothing; the
-whole distro is a chroot). The real bwrap stays untouched at /usr/bin/bwrap,
-and once `pkg upgrade proot` lands the namespace fix (termux/proot#359), the
-next run detects native bwrap working and removes the shim automatically.
-The session is also wrapped in dbus-launch with a private 0700
+It restores/keeps the glycin configs and installs a bwrap shim at
+`/usr/local/bin/bwrap` that execs the image loaders directly (unsandboxed -
+inside proot the sandbox adds nothing; the whole distro is a chroot). The
+real bwrap stays untouched at /usr/bin/bwrap. The shim is permanent: probes
+cannot prove that glycin's real sandboxed invocation (`--seccomp`, mounts)
+works under proot - an earlier revision trusted such a probe, deleted a
+working shim and the desktop crashed again on the next boot. The session is
+also wrapped in dbus-launch with a private 0700
 XDG_RUNTIME_DIR (Arch compiles out D-Bus autolaunch, and dbus rejects a
 world-writable /tmp).
 
@@ -266,7 +267,12 @@ bridge automatically. If pacman reports 404s or "conflicting files"
 (libgcc/gcc-libs), the bridge script repairs the mirrors (your distro is
 Arch Linux ARM - mainline x86_64 mirrors 404 on its repos) and installs
 with a full `-Syu` upgrade in the same transaction; partial upgrades are
-what cause the libgcc conflict. The microphone additionally needs
+what cause the libgcc conflict. The mirror repair also widens single-host
+ALARM sets to mirrors on several independent hostnames (official country
+mirrors plus a university mirror), so networks that reject TLS to the geo
+mirror - "SSL: no alternative certificate subject name matches target
+hostname" - still sync: pacman just moves to the next server, and package
+signatures are verified either way. The microphone additionally needs
 `pactl load-module module-sles-source` on the Termux side (the launcher does
 it and also sets the mic - not the output monitor - as the default source)
 and Android's microphone permission for Termux; Android 12+ users may
