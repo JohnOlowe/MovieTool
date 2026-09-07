@@ -12,6 +12,7 @@ import movies.ops.ImdbRename;
 import movies.ops.Flattener;
 import movies.ops.HealthCheck;
 import movies.ops.SubsMerger;
+import movies.ops.SubsRelocator;
 import movies.ops.SubsShift;
 import movies.ops.SubsSync;
 import movies.ops.VttConvert;
@@ -51,6 +52,7 @@ public final class Cli {
         add(new RenameCommand());
         add(new ImdbRenameCommand());
         add(new SyncSubsCommand());
+        add(new RelocateSubsCommand());
         add(new FlattenCommand());
         add(new MergeSubsCommand());
         add(new ConvertVttCommand());
@@ -260,7 +262,8 @@ public final class Cli {
             return "Usage: movietool imdb-rename -d <folder> [--titles <file>] [options]\n"
                     + "\nReads an episode list with lines like 'S1.E2 \u2219 Episode Title' (as copied\n"
                     + "from IMDB or Netflix) and renames each episode's video and subtitle to\n"
-                    + "'<Show> - S01E02 - <Episode Title><ext>'. Characters Windows forbids\n"
+                    + "'<Show> - S01E02 - <Episode Title>.MVB.IMDB.en<ext>' - the tag the old\n"
+                    + "MoviesRenamer wrote; pass --no-tag to omit it. Characters Windows forbids\n"
                     + "(?, :, \" ...) in titles are sanitised automatically. Dry-run by default.\n"
                     + "  -d, --dir <folder>       Folder with the episode files\n"
                     + "      --titles <file>      Titles list (default: <folder>/titles.list)\n"
@@ -268,7 +271,9 @@ public final class Cli {
                     + "                           inside --dir when present, else --dir itself)\n"
                     + "       --show <name>       Override the show name (default: from the files)\n"
                     + "       --style <style>     's01e01' (default) or '1x01'\n"
-                    + "       --tag <tags>        Tag appended before the extension, e.g. MVB.IMDB.en\n"
+                    + "       --tag <tags>        Tag appended before the extension\n"
+                    + "                           (default: MVB.IMDB.en)\n"
+                    + "       --no-tag            Append no tag at all\n"
                     + "       --replace-with <c>  Replace illegal characters with this (default: remove)\n"
                     + "  -r, --recursive          Also scan video sub-folders\n"
                     + "      --overwrite          Replace existing files\n"
@@ -281,7 +286,8 @@ public final class Cli {
             options.setSecondaryFolder(argsParser.joined("subs"));
             options.setTitlesFile(argsParser.joined("titles"));
             options.setShowName(argsParser.value("show", ""));
-            options.setTag(argsParser.joined("tag"));
+            if (argsParser.has("tag")) options.setTag(argsParser.joined("tag"));
+            if (argsParser.flag("no-tag")) options.setTag("");
             options.setReplaceWith(argsParser.value("replace-with", ""));
             String style = argsParser.value("style", "s01e01").trim();
             String normalized = style.toLowerCase();
@@ -311,6 +317,48 @@ public final class Cli {
                 if (t.state == TransferAction.State.DONE) done++;
             }
             System.out.println(done + " rename(s) done.");
+            return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+        }
+    }
+
+    private static class RelocateSubsCommand implements Command {
+        public String name() { return "relocate-subs"; }
+        public String summary() { return "Move subtitle files into the folder's 'Subtitles' sub-folder"; }
+        public String usage() {
+            return "Usage: movietool relocate-subs -d <folder> [options]\n"
+                    + "\nMoves subtitle files (.srt .vtt .ass .ssa .sub) that sit next to the\n"
+                    + "videos into the folder's 'Subtitles' sub-folder - the layout every\n"
+                    + "MovieTool operation expects. Names are kept as they are, and files\n"
+                    + "already inside 'Subtitles' are never touched. Dry-run by default.\n"
+                    + "  -d, --dir <folder>       Videos folder\n"
+                    + "  -r, --recursive          Also scan video sub-folders ('Subtitles'\n"
+                    + "                           itself is never scanned)\n"
+                    + "      --overwrite          Replace existing files in 'Subtitles'\n"
+                    + "      --apply              Really move (default is a dry run)\n"
+                    + "  -v, --verbose            Show every planned move\n";
+        }
+        public int execute(String[] args) {
+            ArgParser argsParser = new ArgParser(args, aliases(), booleanFlags());
+            Options options = baseOptions(argsParser);
+            SubsRelocator relocator = new SubsRelocator();
+            OperationResult result = relocator.plan(options);
+            if (options.getVerbosity() >= 1) {
+                for (TransferAction transfer : result.getTransfers()) {
+                    System.out.println("  " + transfer.state + ": " + transfer.from.getName()
+                            + "  ->  " + transfer.to.getName());
+                }
+            }
+            print(result, options);
+            if (!options.isApply()) {
+                System.out.println("Dry run; add --apply to move the files.");
+                return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+            }
+            relocator.apply(result, options);
+            int done = 0;
+            for (TransferAction t : result.getTransfers()) {
+                if (t.state == TransferAction.State.DONE) done++;
+            }
+            System.out.println(done + " subtitle file(s) moved.");
             return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
         }
     }
@@ -579,6 +627,7 @@ public final class Cli {
         aliases.put("show", "--show");
         aliases.put("style", "--style");
         aliases.put("tag", "--tag");
+        aliases.put("no-tag", "--no-tag");
         aliases.put("replace-with", "--replace-with");
         aliases.put("top", "--top");
         aliases.put("verbose", "--verbose,-v");
@@ -591,6 +640,6 @@ public final class Cli {
     private static Set<String> booleanFlags() {
         return new HashSet<String>(Arrays.asList(
                 "recursive", "recursive-videos", "apply", "overwrite", "move", "csv", "top",
-                "verbose", "quiet", "no-backup", "backup"));
+                "verbose", "quiet", "no-backup", "backup", "no-tag"));
     }
 }

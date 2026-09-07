@@ -29,8 +29,9 @@ recompiling just to point the tool at a different folder.
 | Operation | What it does |
 |---|---|
 | **Rename** | Rename videos and subtitles to any supported naming convention, or to a custom pattern. Previews everything (dry run) and can then apply the plan atomically — even swap-style renames are safe. |
-| **IMDB rename** | Read a titles list (`titles.list` with lines like `S1.E2 ∙ Episode Title`, as copied from IMDB or Netflix) and rename every episode — video **and** subtitle — to `Show - S01E02 - Episode Title`. Titles containing characters Windows forbids (`? : " / \ | < > *`) are sanitised automatically; the old script failed on exactly those. |
+| **IMDB rename** | Read a titles list (`titles.list` with lines like `S1.E2 ∙ Episode Title`, as copied from IMDB or Netflix) and rename every episode — video **and** subtitle — to `Show - S01E02 - Episode Title`, keeping the classic `.MVB.IMDB.en` tag by default (checkbox to turn it off, `--no-tag` on the command line). Titles containing characters Windows forbids (`? : " / \ | < > *`) are sanitised automatically; the old script failed on exactly those. |
 | **Sync subtitles** | The tool's core job: match subtitle files to their videos (episode-aware, even across different naming conventions) and put each subtitle next to its video, named exactly like the video. Subtitles living inside per-episode download folders are found too. A `Subtitles` folder inside the videos folder is picked up automatically. Copy or move, with overwrite control. |
+| **Collect subtitles** | The reverse of Sync: move subtitle files that sit next to the videos into the folder's `Subtitles` sub-folder (the layout MovieTool expects), keeping their names. Files already in `Subtitles` are never touched; existing targets are skipped unless overwriting. |
 | **Flatten** | Pull media files out of nested folders into one folder, renaming on collisions and cleaning up emptied folders. |
 | **Merge subtitles** | Stack two or more SRT tracks into one (e.g. two languages, or SDH + dialogue). Overlaps are swept and coalesced. |
 | **VTT → SRT** | Batch-convert WebVTT subtitles to SubRip, stripping cue settings and `<c>` tags while keeping `<i>/<b>/<u>`. |
@@ -107,8 +108,9 @@ Every command that writes to your library is a **dry run by default** — add
 ```
 movietool rename -d <folder> -t <convention> [-r] [-c ids] [--pattern p] [--apply]
 movietool imdb-rename -d <folder> [--titles <file>] [-s <subs>] [--show name] [--style s01e01|1x01]
-                     [--tag MVB.IMDB.en] [--replace-with c] [-r] [--overwrite] [--apply]
+                     [--tag MVB.IMDB.en | --no-tag] [--replace-with c] [-r] [--overwrite] [--apply]
 movietool sync-subs -d <videos-folder> [-s <subs-folder>] [-r] [--move] [--overwrite] [--apply]
+movietool relocate-subs -d <folder> [-r] [--overwrite] [--apply]
 movietool flatten -d <folder> [-o <target>] [--apply]
 movietool merge-subs <first.srt> <second.srt> [more...] [-o out.srt] [--top]
 movietool convert-vtt <file-or-folder> [-o out] [-r] [--overwrite]
@@ -141,7 +143,12 @@ movietool sync-subs -d ~/Shows/Flash -s ~/Downloads/subs --move --apply
 #    titles.list contains lines like:  S1.E2 ∙ Middle of Nowhere: Fun Bro?
 movietool imdb-rename -d ~/Shows/Outer\ Banks -v           # preview
 movietool imdb-rename -d ~/Shows/Outer\ Banks --apply      # renames videos + subtitles
-#    ...or with the old tag style:  --style 1x01 --tag MVB.IMDB.en
+#    the .MVB.IMDB.en tag is appended by default (like the old MoviesRenamer);
+#    --no-tag omits it, --tag <text> sets a custom one
+
+# 6. Old library with subtitles sitting next to the videos? Collect them:
+movietool relocate-subs -d ~/Shows/Outer\ Banks            # preview
+movietool relocate-subs -d ~/Shows/Outer\ Banks -r --apply # also scan sub-folders
 ```
 
 ## Safety model

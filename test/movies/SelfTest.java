@@ -14,6 +14,7 @@ import movies.ops.HealthCheck;
 import movies.ops.ImdbRename;
 import movies.ops.EpisodeLister;
 import movies.ops.SubsMerger;
+import movies.ops.SubsRelocator;
 import movies.ops.SubsShift;
 import movies.ops.SubsSync;
 import movies.ops.VttConvert;
@@ -51,6 +52,7 @@ public final class SelfTest {
         testRename();
         testImdbRename();
         testSync();
+        testSubsRelocate();
         testFlatten();
         testEpisodesAndCheck();
 
@@ -339,10 +341,10 @@ public final class SelfTest {
         check("imdb unmatched info", !result.problems().isEmpty());
 
         imdb.apply(result, options);
-        check("imdb video renamed", new File(dir, "Outer Banks - S01E01 - Pilot.mp4").exists());
-        check("imdb sub renamed", new File(dir, "Outer Banks - S01E01 - Pilot.srt").exists());
-        check("imdb illegal chars removed", new File(dir, "Outer Banks - S01E02 - Middle of Nowhere Fun Bro.mp4").exists());
-        check("imdb sub moved out of Subtitles", new File(dir, "Outer Banks - S01E02 - Middle of Nowhere Fun Bro.srt").exists());
+        check("imdb video renamed (default tag)", new File(dir, "Outer Banks - S01E01 - Pilot.MVB.IMDB.en.mp4").exists());
+        check("imdb sub renamed (default tag)", new File(dir, "Outer Banks - S01E01 - Pilot.MVB.IMDB.en.srt").exists());
+        check("imdb illegal chars removed", new File(dir, "Outer Banks - S01E02 - Middle of Nowhere Fun Bro.MVB.IMDB.en.mp4").exists());
+        check("imdb sub moved out of Subtitles", new File(dir, "Outer Banks - S01E02 - Middle of Nowhere Fun Bro.MVB.IMDB.en.srt").exists());
         check("imdb originals gone", !new File(dir, "Outer_Banks_S01_E01.mp4").exists());
 
         // Style and tag options on a fresh fixture.
@@ -370,7 +372,64 @@ public final class SelfTest {
         }
         check("imdb broken line warns but continues", warned);
         imdb3.apply(result3, options3);
-        check("imdb continues after bad line", new File(dir3, "Show - S01E01 - Fine.mp4").exists());
+        check("imdb continues after bad line", new File(dir3, "Show - S01E01 - Fine.MVB.IMDB.en.mp4").exists());
+
+        // The tag can be disabled (GUI checkbox / CLI --no-tag).
+        File dir4 = tempDir("imdb4");
+        touch(dir4, "Show_720P_S01_E01.mp4");
+        IoUtil.writeText(new File(dir4, "titles.list"), "S1.E1 \u2219 Fine\n");
+        Options options4 = options(dir4.getAbsolutePath());
+        options4.setTag("");
+        ImdbRename imdb4 = new ImdbRename();
+        OperationResult result4 = imdb4.plan(options4);
+        imdb4.apply(result4, options4);
+        check("imdb tag disabled", new File(dir4, "Show - S01E01 - Fine.mp4").exists());
+    }
+
+    private static void testSubsRelocate() throws IOException {
+        // Old layout: subtitles sit next to the videos.
+        File dir = tempDir("relocate");
+        touch(dir, "Outer_Banks_S01_E01.mp4");
+        touch(dir, "Outer_Banks_S01_E01.srt");
+        touch(dir, "Outer_Banks_S01_E02.mp4");
+        touch(dir, "Outer_Banks_S01_E02_English.srt");
+        touch(dir, "stray.srt");
+        touch(dir, "notes.txt");
+        File subs = mkdir(dir, "Subtitles");
+        IoUtil.writeText(new File(subs, "Outer_Banks_S01_E02_English.srt"), "existing");
+
+        Options options = options(dir.getAbsolutePath());
+        SubsRelocator relocator = new SubsRelocator();
+        OperationResult result = relocator.plan(options);
+        check("relocate planned count", planned(result) == 2);
+        boolean skipped = false;
+        for (TransferAction t : result.getTransfers()) {
+            if (t.state == TransferAction.State.SKIPPED_EXISTS) skipped = true;
+        }
+        check("relocate collision skipped", skipped);
+        relocator.apply(result, options);
+        check("relocate moved 1", new File(subs, "Outer_Banks_S01_E01.srt").exists());
+        check("relocate moved stray", new File(subs, "stray.srt").exists());
+        check("relocate sources gone", !new File(dir, "Outer_Banks_S01_E01.srt").exists()
+                && !new File(dir, "stray.srt").exists());
+        check("relocate kept collision", new File(dir, "Outer_Banks_S01_E02_English.srt").exists());
+        check("relocate target untouched", "existing".equals(
+                IoUtil.readText(new File(subs, "Outer_Banks_S01_E02_English.srt"))));
+        check("relocate ignores non-subs", !new File(subs, "notes.txt").exists());
+
+        // Overwrite replaces existing files; recursive reaches video sub-folders
+        // but never the Subtitles folder itself.
+        File season = mkdir(dir, "Season 1");
+        touch(season, "Outer_Banks_S01_E03.srt");
+        options.setOverwrite(true);
+        options.setRecursive(true);
+        OperationResult result2 = relocator.plan(options);
+        check("relocate overwrite+recursive planned", planned(result2) == 2);
+        relocator.apply(result2, options);
+        check("relocate overwrote", !new File(dir, "Outer_Banks_S01_E02_English.srt").exists()
+                && "fixture".equals(IoUtil.readText(new File(subs, "Outer_Banks_S01_E02_English.srt"))));
+        check("relocate recursive moved", new File(subs, "Outer_Banks_S01_E03.srt").exists());
+        check("relocate videos untouched", new File(dir, "Outer_Banks_S01_E01.mp4").exists());
     }
 
     private static void testSync() throws IOException {

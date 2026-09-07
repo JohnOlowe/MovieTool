@@ -63,8 +63,10 @@ public class Options {
     /** Episode marker style for the IMDB rename: "s01e01" or "1x01". */
     private String style = "s01e01";
 
-    /** Extra tag appended before the extension, e.g. "MVB.IMDB.en". */
-    private String tag = "";
+    /** Extra tag appended before the extension. Default: the tag the original
+     *  MoviesRenamer always wrote ("MVB.IMDB.en" -> "Name.MVB.IMDB.en.srt").
+     *  Empty = no tag (GUI checkbox unticked / CLI --no-tag). */
+    private String tag = "MVB.IMDB.en";
 
     /** What illegal file name characters are replaced with ("" = remove). */
     private String replaceWith = "";

@@ -11,6 +11,7 @@ import movies.ops.Flattener;
 import movies.ops.ImdbRename;
 import movies.ops.HealthCheck;
 import movies.ops.SubsMerger;
+import movies.ops.SubsRelocator;
 import movies.ops.SubsShift;
 import movies.ops.SubsSync;
 import movies.ops.VttConvert;
@@ -232,7 +233,9 @@ final class Cards {
         private final JTextField subs = form.addPathField("Subtitles folder:", true,
                 "optional; 'Subtitles' inside the folder is used when present");
         private final JComboBox<String> style = new JComboBox<String>(new String[] { "S01E01", "1x01" });
-        private final JTextField tag = form.addTextField("Tag (optional):", "e.g. MVB.IMDB.en");
+        private final JTextField tag = form.addTextField("Tag:",
+                "appended before the extension (default keeps the old MoviesRenamer tag)");
+        private final JCheckBox appendTag = form.addCheckbox("Append tag to renamed files", true);
         private final JTextField replaceWith = form.addTextField("Replace illegal chars with:", "blank = remove (?, : ...)");
         private final JCheckBox recursive = form.addCheckbox("Scan video sub-folders", false);
         private final JCheckBox overwrite = form.addCheckbox("Overwrite existing files", false);
@@ -243,6 +246,8 @@ final class Cards {
 
         ImdbCard() {
             super("IMDB rename", "Rename episodes to their IMDB titles from a titles list ('S1.E2 ∙ Title'), subtitles included.");
+            tag.setText("MVB.IMDB.en");
+            form.addRow("Episode marker:", style, null);
         }
 
         @Override
@@ -257,7 +262,7 @@ final class Cards {
             options.setShowName(show.getText().trim());
             options.setSecondaryFolder(subs.getText().trim());
             options.setStyle(style.getSelectedIndex() == 1 ? "1x01" : "s01e01");
-            options.setTag(tag.getText().trim());
+            options.setTag(appendTag.isSelected() ? tag.getText().trim() : "");
             options.setReplaceWith(replaceWith.getText().trim());
             options.setRecursive(recursive.isSelected());
             options.setOverwrite(overwrite.isSelected());
@@ -360,6 +365,67 @@ final class Cards {
             Options options = new Options();
             options.setMove(move.isSelected());
             sync.apply(lastResult, options);
+            lastPlanApplicable = false;
+            return lastResult;
+        }
+    }
+
+    // ---------------------------------------------------------- relocate
+
+    static final class RelocateCard extends PlanCard {
+        private final Form form = new Form();
+        private final JTextField dir = form.addPathField("Videos folder:", true);
+        private final JCheckBox recursive = form.addCheckbox("Scan sub-folders too", false);
+        private final JCheckBox overwrite = form.addCheckbox("Overwrite files already in 'Subtitles'", false);
+        private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
+        private final SubsRelocator relocator = new SubsRelocator();
+        private volatile OperationResult lastResult;
+
+        RelocateCard() {
+            super("Collect subtitles", "Move subtitle files that sit next to the videos into the folder's 'Subtitles' sub-folder (names are kept as they are).");
+        }
+
+        @Override
+        public JComponent component() {
+            return form.panel();
+        }
+
+        @Override
+        public void collect(Options options) {
+            options.setFolder(dir.getText().trim());
+            options.setRecursive(recursive.isSelected());
+            options.setOverwrite(overwrite.isSelected());
+            options.setDryRun(dryRun.isSelected());
+        }
+
+        @Override
+        public OperationResult run(Options options) {
+            lastPlanApplicable = false;
+            lastResult = relocator.plan(options);
+            long planned = 0;
+            for (TransferAction t : lastResult.getTransfers()) {
+                if (t.state == TransferAction.State.PLANNED) planned++;
+            }
+            if (!options.isDryRun() && planned > 0 && lastResult.errorCount() == 0) {
+                relocator.apply(lastResult, options);
+                lastPlanApplicable = false;
+            } else {
+                lastPlanApplicable = planned > 0 && lastResult.errorCount() == 0;
+            }
+            if (planned == 0 && lastResult.errorCount() == 0) {
+                lastResult.add(Problem.info("Nothing to move - subtitles are already collected."));
+            }
+            return lastResult;
+        }
+
+        @Override
+        public OperationResult apply() {
+            if (lastResult == null) {
+                OperationResult result = new OperationResult();
+                result.add(Problem.error("Run a dry run first."));
+                return result;
+            }
+            relocator.apply(lastResult, new Options());
             lastPlanApplicable = false;
             return lastResult;
         }
@@ -587,6 +653,7 @@ final class Cards {
         cards.add(new RenameCard());
         cards.add(new ImdbCard());
         cards.add(new SyncCard());
+        cards.add(new RelocateCard());
         cards.add(new FlattenCard());
         cards.add(new MergeCard());
         cards.add(new VttCard());
