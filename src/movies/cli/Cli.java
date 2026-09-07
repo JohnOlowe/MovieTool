@@ -323,17 +323,23 @@ public final class Cli {
 
     private static class RelocateSubsCommand implements Command {
         public String name() { return "relocate-subs"; }
-        public String summary() { return "Move subtitle files into the folder's 'Subtitles' sub-folder"; }
+        public String summary() { return "Move subtitles (and their folders) into the folder's 'Subtitles' sub-folder"; }
         public String usage() {
             return "Usage: movietool relocate-subs -d <folder> [options]\n"
-                    + "\nMoves subtitle files (.srt .vtt .ass .ssa .sub) that sit next to the\n"
-                    + "videos into the folder's 'Subtitles' sub-folder - the layout every\n"
-                    + "MovieTool operation expects. Names are kept as they are, and files\n"
-                    + "already inside 'Subtitles' are never touched. Dry-run by default.\n"
+                    + "\nMoves subtitles that sit outside the folder's 'Subtitles' sub-folder\n"
+                    + "into it - names are kept as they are, and files already inside\n"
+                    + "'Subtitles' are never touched:\n"
+                    + "  - loose subtitle files go directly into 'Subtitles'\n"
+                    + "  - folders that contain only subtitles ('Outer_Banks_S01_E01/\n"
+                    + "    whatever.srt') move WHOLE - the subtitle stays inside its folder\n"
+                    + "  - folders that also contain videos keep the videos; their subtitles\n"
+                    + "    are grouped under 'Subtitles/<folder name>/'\n"
+                    + "Dry-run by default.\n"
                     + "  -d, --dir <folder>       Videos folder\n"
                     + "  -r, --recursive          Also scan video sub-folders ('Subtitles'\n"
                     + "                           itself is never scanned)\n"
-                    + "      --overwrite          Replace existing files in 'Subtitles'\n"
+                    + "      --overwrite          Replace existing subtitle files (whole\n"
+                    + "                           folders are never overwritten)\n"
                     + "      --apply              Really move (default is a dry run)\n"
                     + "  -v, --verbose            Show every planned move\n";
         }

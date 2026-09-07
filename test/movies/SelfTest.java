@@ -387,49 +387,70 @@ public final class SelfTest {
     }
 
     private static void testSubsRelocate() throws IOException {
-        // Old layout: subtitles sit next to the videos.
+        // Series layout: per-episode folders, loose subs, one folder already migrated.
         File dir = tempDir("relocate");
         touch(dir, "Outer_Banks_S01_E01.mp4");
-        touch(dir, "Outer_Banks_S01_E01.srt");
+        File ep1 = mkdir(dir, "Outer_Banks_S01_E01");            // pure subtitle folder
+        touch(ep1, "whatever.en.srt");
         touch(dir, "Outer_Banks_S01_E02.mp4");
-        touch(dir, "Outer_Banks_S01_E02_English.srt");
+        File ep2 = mkdir(dir, "Outer_Banks_S01_E02");            // already migrated earlier
+        touch(ep2, "Outer_Banks_S01_E02_English.srt");
+        File mixed = mkdir(dir, "Movie_Night");                  // video + subtitle together
+        touch(mixed, "Movie_Night.mp4");
+        touch(mixed, "Movie_Night.en.srt");
         touch(dir, "stray.srt");
         touch(dir, "notes.txt");
         File subs = mkdir(dir, "Subtitles");
-        IoUtil.writeText(new File(subs, "Outer_Banks_S01_E02_English.srt"), "existing");
+        File ep2migrated = mkdir(subs, "Outer_Banks_S01_E02");
+        IoUtil.writeText(new File(ep2migrated, "Outer_Banks_S01_E02_English.srt"), "fixture");
+        IoUtil.writeText(new File(subs, "stray.srt"), "existing");
 
         Options options = options(dir.getAbsolutePath());
         SubsRelocator relocator = new SubsRelocator();
         OperationResult result = relocator.plan(options);
-        check("relocate planned count", planned(result) == 2);
-        boolean skipped = false;
+        check("relocate planned count", planned(result) == 2);   // E01 whole + Movie_Night sub
+        int skipped = 0;
         for (TransferAction t : result.getTransfers()) {
-            if (t.state == TransferAction.State.SKIPPED_EXISTS) skipped = true;
+            if (t.state == TransferAction.State.SKIPPED_EXISTS) skipped++;
         }
-        check("relocate collision skipped", skipped);
+        check("relocate skips existing", skipped == 2);          // E02 folder + stray.srt
         relocator.apply(result, options);
-        check("relocate moved 1", new File(subs, "Outer_Banks_S01_E01.srt").exists());
-        check("relocate moved stray", new File(subs, "stray.srt").exists());
-        check("relocate sources gone", !new File(dir, "Outer_Banks_S01_E01.srt").exists()
-                && !new File(dir, "stray.srt").exists());
-        check("relocate kept collision", new File(dir, "Outer_Banks_S01_E02_English.srt").exists());
-        check("relocate target untouched", "existing".equals(
-                IoUtil.readText(new File(subs, "Outer_Banks_S01_E02_English.srt"))));
+        check("relocate sub folder moved whole", new File(subs, "Outer_Banks_S01_E01/whatever.en.srt").exists());
+        check("relocate sub folder source gone", !ep1.exists());
+        check("relocate mixed folder keeps video", new File(mixed, "Movie_Night.mp4").exists());
+        check("relocate mixed sub grouped by folder", new File(subs, "Movie_Night/Movie_Night.en.srt").exists());
+        check("relocate mixed sub source gone", !new File(mixed, "Movie_Night.en.srt").exists());
+        check("relocate folder skip keeps original", new File(ep2, "Outer_Banks_S01_E02_English.srt").exists());
+        check("relocate migrated content intact", "fixture".equals(
+                IoUtil.readText(new File(ep2migrated, "Outer_Banks_S01_E02_English.srt"))));
+        check("relocate stray kept", new File(dir, "stray.srt").exists());
         check("relocate ignores non-subs", !new File(subs, "notes.txt").exists());
 
-        // Overwrite replaces existing files; recursive reaches video sub-folders
-        // but never the Subtitles folder itself.
+        // Recursive: a pure sub folder inside "Season 1" moves whole by its own
+        // name; a mixed folder reached twice is still planned only once.
         File season = mkdir(dir, "Season 1");
-        touch(season, "Outer_Banks_S01_E03.srt");
+        File ep3 = mkdir(season, "Outer_Banks_S01_E03");
+        touch(ep3, "Outer_Banks_S01_E03_English.srt");
+        File extras = mkdir(dir, "Extras_2023");
+        touch(extras, "Extras_2023.mp4");
+        touch(extras, "Extras_2023.en.srt");
         options.setOverwrite(true);
         options.setRecursive(true);
         OperationResult result2 = relocator.plan(options);
-        check("relocate overwrite+recursive planned", planned(result2) == 2);
+        check("relocate recursive planned", planned(result2) == 3);  // stray + E03 folder + extras sub
+        int dupes = 0;
+        for (TransferAction t : result2.getTransfers()) {
+            if (t.from.getName().equals("Extras_2023.en.srt")) dupes++;
+        }
+        check("relocate no duplicate plans", dupes == 1);
         relocator.apply(result2, options);
-        check("relocate overwrote", !new File(dir, "Outer_Banks_S01_E02_English.srt").exists()
-                && "fixture".equals(IoUtil.readText(new File(subs, "Outer_Banks_S01_E02_English.srt"))));
-        check("relocate recursive moved", new File(subs, "Outer_Banks_S01_E03.srt").exists());
-        check("relocate videos untouched", new File(dir, "Outer_Banks_S01_E01.mp4").exists());
+        check("relocate stray overwritten", "fixture".equals(IoUtil.readText(new File(subs, "stray.srt"))));
+        check("relocate deep folder moved whole", new File(subs, "Outer_Banks_S01_E03/Outer_Banks_S01_E03_English.srt").exists());
+        check("relocate deep source gone", !ep3.exists());
+        check("relocate extras sub grouped", new File(subs, "Extras_2023/Extras_2023.en.srt").exists());
+        check("relocate extras video kept", new File(extras, "Extras_2023.mp4").exists());
+        check("relocate videos untouched", new File(dir, "Outer_Banks_S01_E01.mp4").exists()
+                && new File(dir, "Outer_Banks_S01_E02.mp4").exists());
     }
 
     private static void testSync() throws IOException {

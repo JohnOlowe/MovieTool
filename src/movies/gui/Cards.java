@@ -382,7 +382,7 @@ final class Cards {
         private volatile OperationResult lastResult;
 
         RelocateCard() {
-            super("Collect subtitles", "Move subtitle files that sit next to the videos into the folder's 'Subtitles' sub-folder (names are kept as they are).");
+            super("Collect subtitles", "Move subtitles that sit outside the 'Subtitles' sub-folder into it: loose files directly; per-episode subtitle folders move whole (the subtitle stays inside its folder); folders that also contain videos keep the videos.");
         }
 
         @Override
