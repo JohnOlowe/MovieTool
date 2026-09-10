@@ -120,6 +120,14 @@ public final class MovieToolGui extends JFrame {
         cardPanel.setLayout(cardLayout);
         for (OpCard card : cards) cardPanel.add(card.component(), card.getTitle());
 
+        // The Help entry: not an operation, just the guide.
+        javax.swing.JEditorPane helpPane = new javax.swing.JEditorPane("text/html", "");
+        helpPane.setEditable(false);
+        helpPane.setText(HelpBook.html());
+        helpPane.setCaretPosition(0);
+        cardPanel.add(new JScrollPane(helpPane), "Help");
+        cardTitles.addElement("Help");
+
         JPanel listPanel = new JPanel(new BorderLayout());
         listPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 4));
         listPanel.add(new JScrollPane(cardList), BorderLayout.CENTER);
@@ -196,18 +204,28 @@ public final class MovieToolGui extends JFrame {
     }
 
     private void selectCard(int index) {
-        if (index < 0 || index >= cards.size()) index = 0;
+        if (index < 0 || index > cards.size()) index = 0;
+        if (index == cards.size()) {
+            current = null;
+            cardList.setSelectedIndex(index);
+            cardLayout.show(cardPanel, "Help");
+            descriptionLabel.setText("Help - what every function does and when to use it.");
+            runButton.setEnabled(false);
+            applyButton.setEnabled(false);
+            return;
+        }
         current = cards.get(index);
         cardList.setSelectedIndex(index);
         cardLayout.show(cardPanel, current.getTitle());
         descriptionLabel.setText(current.getDescription());
+        runButton.setEnabled(true);
         updateApplyButton();
     }
 
     // ------------------------------------------------------------- running
 
     private void runCurrent() {
-        if (worker != null) return;
+        if (worker != null || current == null) return;
         final Options options = new Options();
         try {
             current.collect(options);
@@ -265,7 +283,7 @@ public final class MovieToolGui extends JFrame {
     }
 
     private void setBusy(boolean busy) {
-        runButton.setEnabled(!busy);
+        runButton.setEnabled(!busy && current != null);
         applyButton.setEnabled(!busy && current != null && current.canApply() && current.isApplyReady());
         progress.setIndeterminate(busy);
         progress.setVisible(busy);

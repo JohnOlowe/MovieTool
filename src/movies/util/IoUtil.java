@@ -58,6 +58,31 @@ public final class IoUtil {
         return new String(bytes, UTF_8);
     }
 
+    /** Reads a stream to the end, capping at maxBytes. */
+    public static byte[] readAll(InputStream in, int maxBytes) throws IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[BUFFER_SIZE];
+        int total = 0;
+        int read;
+        while ((read = in.read(buffer)) >= 0) {
+            total += read;
+            if (total > maxBytes) throw new IOException("file too large (over " + maxBytes + " bytes)");
+            out.write(buffer, 0, read);
+        }
+        return out.toByteArray();
+    }
+
+    /** Writes raw bytes (parent folders are created as needed). */
+    public static void writeAll(File file, byte[] bytes) throws IOException {
+        mkdirs(file.getParentFile());
+        FileOutputStream out = new FileOutputStream(file);
+        try {
+            out.write(bytes);
+        } finally {
+            out.close();
+        }
+    }
+
     public static byte[] readAll(File file) throws IOException {
         FileInputStream in = new FileInputStream(file);
         try {

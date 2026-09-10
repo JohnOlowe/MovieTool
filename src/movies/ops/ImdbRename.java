@@ -77,6 +77,29 @@ public class ImdbRename {
     // ------------------------------------------------------------- parsing
 
     /**
+     * Parses one line into an episode entry, or returns {@code null} when the
+     * line is not an episode line ("S1.E2 ∙ Title", "s01e02 • Title",
+     * "1x02 · Title"). Shared with the titles list cleaner.
+     */
+    public static EpisodeEntry parseEpisodeLine(String raw) {
+        String line = raw.replace("\uFEFF", "").trim();
+        if (line.isEmpty()) return null;
+        Matcher m = TITLE_LINE.matcher(line);
+        if (!m.matches()) return null;
+        int season;
+        int episode;
+        if (m.group(1) != null) {
+            season = Integer.parseInt(m.group(1));
+            episode = Integer.parseInt(m.group(2));
+        } else {
+            season = Integer.parseInt(m.group(3));
+            episode = Integer.parseInt(m.group(4));
+        }
+        if (episode <= 0) return null;
+        return new EpisodeEntry(season, episode, stripQuotes(m.group(5)), line);
+    }
+
+    /**
      * Parses the titles list. Header lines without an episode marker are
      * skipped; lines that look like episodes but fail to parse produce a
      * warning instead of aborting (the old tool bailed out on those).
@@ -86,27 +109,15 @@ public class ImdbRename {
         int lineNumber = 0;
         for (String raw : IoUtil.readLines(titlesFile)) {
             lineNumber++;
-            String line = raw.replace("\uFEFF", "").trim();
-            if (line.isEmpty()) continue;
-            Matcher m = TITLE_LINE.matcher(line);
-            if (m.matches()) {
-                int season;
-                int episode;
-                if (m.group(1) != null) {
-                    season = Integer.parseInt(m.group(1));
-                    episode = Integer.parseInt(m.group(2));
-                } else {
-                    season = Integer.parseInt(m.group(3));
-                    episode = Integer.parseInt(m.group(4));
+            EpisodeEntry entry = parseEpisodeLine(raw);
+            if (entry != null) {
+                entries.add(entry);
+            } else {
+                String line = raw.replace("\uFEFF", "").trim();
+                if (!line.isEmpty() && looksLikeEpisodeLine(line)) {
+                    result.add(Problem.warn("Line " + lineNumber + " does not start with an episode number, skipped: "
+                            + shorten(line)));
                 }
-                if (episode <= 0) {
-                    result.add(Problem.warn("Line " + lineNumber + ": episode number must be positive, skipped"));
-                    continue;
-                }
-                entries.add(new EpisodeEntry(season, episode, stripQuotes(m.group(5)), line));
-            } else if (looksLikeEpisodeLine(line)) {
-                result.add(Problem.warn("Line " + lineNumber + " does not start with an episode number, skipped: "
-                        + shorten(line)));
             }
         }
         return entries;

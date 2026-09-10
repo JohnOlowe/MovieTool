@@ -32,6 +32,8 @@ recompiling just to point the tool at a different folder.
 | **IMDB rename** | Read a titles list (`titles.list` with lines like `S1.E2 ∙ Episode Title`, as copied from IMDB or Netflix) and rename every episode — video **and** subtitle — to `Show - S01E02 - Episode Title`, keeping the classic `.MVB.IMDB.en` tag by default (checkbox to turn it off, `--no-tag` on the command line). Titles containing characters Windows forbids (`? : " / \ | < > *`) are sanitised automatically; the old script failed on exactly those. |
 | **Sync subtitles** | The tool's core job: match subtitle files to their videos (episode-aware, even across different naming conventions) and put each subtitle next to its video, named exactly like the video. Subtitles living inside per-episode download folders are found too. A `Subtitles` folder inside the videos folder is picked up automatically. Copy or move, with overwrite control. |
 | **Collect subtitles** | The reverse of Sync: move subtitles that sit outside the `Subtitles` sub-folder into it, keeping their names. Loose files go into `Subtitles` directly; per-episode folders that contain only subtitles move **whole** (the subtitle stays inside its folder); folders that also contain videos keep the videos, their subtitles grouped under `Subtitles/<folder name>/`. |
+| **Clean titles list** | Strip `titles.list` down to its episode lines: show name, `TV Series` and other copied noise are removed; the kept lines are rewritten canonically (`S1.E2 ∙ Title`), deduplicated and sorted. Writes a new `-clean.list` file by default, or replaces the original (keeping a `.bak`). |
+| **Download subtitles** | Bulk-download subtitles for every video that has none, from OpenSubtitles.com — searched by the file's unique hash first (exact release), then by title/season/episode. Each download is named exactly like its video (next to it, or into the `Subtitles` folder). Needs a free API key. |
 | **Flatten** | Pull media files out of nested folders into one folder, renaming on collisions and cleaning up emptied folders. |
 | **Merge subtitles** | Stack two or more SRT tracks into one (e.g. two languages, or SDH + dialogue). Overlaps are swept and coalesced. |
 | **VTT → SRT** | Batch-convert WebVTT subtitles to SubRip, stripping cue settings and `<c>` tags while keeping `<i>/<b>/<u>`. |
@@ -59,6 +61,11 @@ have it). A pre-built `movietool.jar` ships in this repository.
 ./movietool.sh              # graphical interface
 ./movietool.sh help         # command line
 ./movietool.sh check -d ~/Shows/TheFlash -r
+```
+
+The graphical interface has a **Help** entry at the bottom of the function
+list - a full guide to every function: what it does, when to use it and how
+they work together.
 ```
 
 If `movietool.jar` is missing, both launchers try to build it automatically
@@ -111,6 +118,8 @@ movietool imdb-rename -d <folder> [--titles <file>] [-s <subs>] [--show name] [-
                      [--tag MVB.IMDB.en | --no-tag] [--replace-with c] [-r] [--overwrite] [--apply]
 movietool sync-subs -d <videos-folder> [-s <subs-folder>] [-r] [--move] [--overwrite] [--apply]
 movietool relocate-subs -d <folder> [-r] [--overwrite] [--apply]
+movietool clean-titles (-f <file> | -d <folder>) [-o out] [--replace] [--no-sort] [--apply]
+movietool download-subs -d <folder> [-r] [--lang en] [--api-key k] [--into-subs-folder] [--apply]
 movietool flatten -d <folder> [-o <target>] [--apply]
 movietool merge-subs <first.srt> <second.srt> [more...] [-o out.srt] [--top]
 movietool convert-vtt <file-or-folder> [-o out] [-r] [--overwrite]
@@ -149,11 +158,20 @@ movietool imdb-rename -d ~/Shows/Outer\ Banks --apply      # renames videos + su
 # 6. Old library with subtitles sitting next to the videos? Collect them:
 movietool relocate-subs -d ~/Shows/Outer\ Banks            # preview
 movietool relocate-subs -d ~/Shows/Outer\ Banks -r --apply # also scan sub-folders
+
+# 7. Slim titles.list down to just the episode lines:
+movietool clean-titles -d ~/Shows/Outer\ Banks             # preview (default: -clean.list)
+movietool clean-titles -d ~/Shows/Outer\ Banks --replace --apply
+
+# 8. Bulk-download subtitles for videos that have none (free API key from
+#    opensubtitles.com -> user settings -> API Keys):
+movietool download-subs -d ~/Shows/Outer\ Banks            # offline preview
+OPENSUBTITLES_API_KEY=... movietool download-subs -d ~/Shows/Outer\ Banks -r --apply
 ```
 
 ## Safety model
 
-- `rename`, `sync-subs` and `flatten` are dry runs unless `--apply` is given.
+- `rename`, `sync-subs`, `relocate-subs`, `clean-titles`, `download-subs` and `flatten` are dry runs unless `--apply` is given.
 - Renames are executed in two phases (everything to temporary names first),
   so cycles like `A → B` while `B → A` cannot destroy files; failures roll
   back what was already done.

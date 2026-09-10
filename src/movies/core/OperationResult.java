@@ -16,6 +16,22 @@ public class OperationResult {
     private RenameEngine.RenamePlan renamePlan;
     private List<TransferAction> transfers;
 
+    /** Videos without subtitles (download-subs only). */
+    private java.util.List<java.io.File> missingVideos;
+
+    public java.util.List<java.io.File> getMissingVideos() { return missingVideos; }
+    public void setMissingVideos(java.util.List<java.io.File> missingVideos) { this.missingVideos = missingVideos; }
+
+    /** Cleaned titles-list content (titles cleaner only). */
+    private String cleanTitlesContent;
+    /** Where the cleaned titles list would be written (titles cleaner only). */
+    private java.io.File cleanTitlesTarget;
+
+    public String getCleanTitlesContent() { return cleanTitlesContent; }
+    public void setCleanTitlesContent(String cleanTitlesContent) { this.cleanTitlesContent = cleanTitlesContent; }
+    public java.io.File getCleanTitlesTarget() { return cleanTitlesTarget; }
+    public void setCleanTitlesTarget(java.io.File cleanTitlesTarget) { this.cleanTitlesTarget = cleanTitlesTarget; }
+
     public List<Problem> problems() {
         return problems;
     }

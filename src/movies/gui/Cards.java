@@ -10,10 +10,12 @@ import movies.ops.EpisodeLister;
 import movies.ops.Flattener;
 import movies.ops.ImdbRename;
 import movies.ops.HealthCheck;
+import movies.ops.SubsDownloader;
 import movies.ops.SubsMerger;
 import movies.ops.SubsRelocator;
 import movies.ops.SubsShift;
 import movies.ops.SubsSync;
+import movies.ops.TitlesCleaner;
 import movies.ops.VttConvert;
 import movies.util.IoUtil;
 
@@ -31,6 +33,7 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.prefs.Preferences;
 
 /**
  * The concrete operation cards. Each is a small form; execution is delegated
@@ -431,7 +434,154 @@ final class Cards {
         }
     }
 
+    // ------------------------------------------------------- clean-titles
+
+    static final class CleanTitlesCard extends PlanCard {
+        private final Form form = new Form();
+        private final JTextField titles = form.addPathField("Titles list:", false,
+                "default: titles.list in the folder");
+        private final JTextField output = form.addTextField("New file (when not replacing):",
+                "default: <original>-clean.list next to it");
+        private final JCheckBox inPlace = form.addCheckbox("Replace the original (a .bak copy is kept)", false);
+        private final JCheckBox sort = form.addCheckbox("Sort by season/episode, remove duplicates", true);
+        private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
+        private final TitlesCleaner cleaner = new TitlesCleaner();
+        private volatile OperationResult lastResult;
+
+        CleanTitlesCard() {
+            super("Clean titles list", "Strip a titles list down to its episode lines: the show name, 'TV Series' and other noise are removed; the kept lines are rewritten canonically, deduplicated and sorted.");
+        }
+
+        @Override
+        public JComponent component() {
+            return form.panel();
+        }
+
+        @Override
+        public void collect(Options options) {
+            String file = titles.getText().trim();
+            options.setTitlesFile(file);
+            options.setFolder(file.isEmpty() ? "" : file);   // the launcher requires a non-empty folder
+            options.setOutput(output.getText().trim());
+            options.setTitlesInPlace(inPlace.isSelected());
+            options.setSortTitles(sort.isSelected());
+            options.setDryRun(dryRun.isSelected());
+        }
+
+        @Override
+        public OperationResult run(Options options) {
+            lastPlanApplicable = false;
+            lastResult = cleaner.plan(options);
+            String content = lastResult.getCleanTitlesContent();
+            if (content != null) {
+                for (String line : content.split("\\r?\\n|\\r")) {
+                    if (!line.isEmpty()) lastResult.add(Problem.info("keep: " + line));
+                }
+            }
+            if (!options.isDryRun() && lastResult.errorCount() == 0
+                    && lastResult.getCleanTitlesTarget() != null) {
+                cleaner.apply(lastResult, options);
+            } else {
+                lastPlanApplicable = lastResult.errorCount() == 0 && lastResult.getCleanTitlesTarget() != null;
+            }
+            return lastResult;
+        }
+
+        @Override
+        public OperationResult apply() {
+            if (lastResult == null) {
+                OperationResult result = new OperationResult();
+                result.add(Problem.error("Run a dry run first."));
+                return result;
+            }
+            Options options = new Options();
+            options.setTitlesInPlace(inPlace.isSelected());
+            options.setOverwrite(true);
+            cleaner.apply(lastResult, options);
+            lastPlanApplicable = false;
+            return lastResult;
+        }
+    }
+
+    // ------------------------------------------------------ download-subs
+
+    static final class DownloadSubsCard extends PlanCard {
+        private static final String PREF_KEY = "opensubtitles.apikey";
+        private final Form form = new Form();
+        private final JTextField dir = form.addPathField("Videos folder:", true);
+        private final JTextField language = form.addTextField("Subtitle language:", "ISO code, e.g. en");
+        private final JTextField apiKey = form.addTextField("OpenSubtitles API key:",
+                "free: opensubtitles.com -> user settings -> API Keys");
+        private final JCheckBox remember = form.addCheckbox("Remember the API key on this computer", true);
+        private final JCheckBox recursive = form.addCheckbox("Scan video sub-folders", true);
+        private final JCheckBox intoFolder = form.addCheckbox("Put downloads into the 'Subtitles' folder", false);
+        private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
+        private final SubsDownloader downloader = new SubsDownloader();
+        private volatile OperationResult lastResult;
+
+        DownloadSubsCard() {
+            super("Download subtitles", "Bulk-download subtitles for videos that have none (OpenSubtitles.com) and name each one exactly like its video. Needs a free API key.");
+            language.setText("en");
+            String saved = Preferences.userNodeForPackage(Cards.class).get(PREF_KEY, "");
+            if (!saved.isEmpty()) {
+                apiKey.setText(saved);
+            } else {
+                remember.setSelected(false);
+            }
+        }
+
+        @Override
+        public JComponent component() {
+            return form.panel();
+        }
+
+        @Override
+        public void collect(Options options) {
+            options.setFolder(dir.getText().trim());
+            options.setRecursive(recursive.isSelected());
+            options.setSubsLanguage(language.getText().trim());
+            options.setApiKey(apiKey.getText().trim());
+            options.setSubsIntoFolder(intoFolder.isSelected());
+            options.setDryRun(dryRun.isSelected());
+            if (remember.isSelected() && !options.getApiKey().isEmpty()) {
+                Preferences.userNodeForPackage(Cards.class).put(PREF_KEY, options.getApiKey());
+            } else if (!remember.isSelected()) {
+                Preferences.userNodeForPackage(Cards.class).remove(PREF_KEY);
+            }
+        }
+
+        @Override
+        public OperationResult run(Options options) {
+            lastPlanApplicable = false;
+            lastResult = downloader.plan(options);
+            if (!options.isDryRun() && !lastResult.getMissingVideos().isEmpty()
+                    && lastResult.errorCount() == 0) {
+                downloader.apply(lastResult, options);
+            } else {
+                lastPlanApplicable = lastResult.getMissingVideos() != null
+                        && !lastResult.getMissingVideos().isEmpty() && lastResult.errorCount() == 0;
+            }
+            return lastResult;
+        }
+
+        @Override
+        public OperationResult apply() {
+            if (lastResult == null || lastResult.getMissingVideos() == null) {
+                OperationResult result = new OperationResult();
+                result.add(Problem.error("Run a dry run first."));
+                return result;
+            }
+            Options options = new Options();
+            collect(options);
+            options.setDryRun(false);
+            downloader.apply(lastResult, options);
+            lastPlanApplicable = false;
+            return lastResult;
+        }
+    }
+
     // ------------------------------------------------------------ flatten
+
 
     static final class FlattenCard extends PlanCard {
         private final Form form = new Form();
@@ -652,8 +802,10 @@ final class Cards {
         List<OpCard> cards = new ArrayList<OpCard>();
         cards.add(new RenameCard());
         cards.add(new ImdbCard());
+        cards.add(new CleanTitlesCard());
         cards.add(new SyncCard());
         cards.add(new RelocateCard());
+        cards.add(new DownloadSubsCard());
         cards.add(new FlattenCard());
         cards.add(new MergeCard());
         cards.add(new VttCard());

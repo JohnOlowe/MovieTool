@@ -13,13 +13,16 @@ import movies.ops.Flattener;
 import movies.ops.HealthCheck;
 import movies.ops.ImdbRename;
 import movies.ops.EpisodeLister;
+import movies.ops.SubsDownloader;
 import movies.ops.SubsMerger;
 import movies.ops.SubsRelocator;
 import movies.ops.SubsShift;
 import movies.ops.SubsSync;
+import movies.ops.TitlesCleaner;
 import movies.ops.VttConvert;
 import movies.subs.SubRip;
 import movies.util.IoUtil;
+import movies.util.Json;
 
 import java.io.File;
 import java.io.IOException;
@@ -53,6 +56,9 @@ public final class SelfTest {
         testImdbRename();
         testSync();
         testSubsRelocate();
+        testTitlesClean();
+        testJson();
+        testDownloadSubs();
         testFlatten();
         testEpisodesAndCheck();
 
@@ -518,6 +524,177 @@ public final class SelfTest {
         check("rename guard no dangling dash", !guardPlan.actions().get(0).to.getName().contains(" - ."));
         guardPlan.apply();
         check("rename guard applied", new File(guardDir, "The_Flash S01E01.mp4").exists());
+    }
+
+    private static void testTitlesClean() throws IOException {
+        File dir = tempDir("titles");
+        String nl = System.getProperty("line.separator");
+        IoUtil.writeText(new File(dir, "titles.list"),
+                "Outer Banks (2020)" + nl
+                + "TV Series" + nl
+                + "S1.E2 \u2219 B Side" + nl
+                + "S1.E1 \u2219 A Side" + nl
+                + "S1.E1 \u2219 A Side" + nl
+                + "S1 \u2219 broken line" + nl);
+        Options options = options(dir.getAbsolutePath());
+        TitlesCleaner cleaner = new TitlesCleaner();
+        OperationResult result = cleaner.plan(options);
+        check("titles kept two, sorted, deduped", (nl + "S1.E1 \u2219 A Side" + nl + "S1.E2 \u2219 B Side" + nl)
+                .equals(nl + result.getCleanTitlesContent()));
+        check("titles default target is a new file", result.getCleanTitlesTarget().equals(new File(dir, "titles-clean.list")));
+        check("titles report counts", result.getReport().contains("2 episode line(s) kept"));
+        cleaner.apply(result, options);
+        check("titles new file written", new File(dir, "titles-clean.list").exists());
+        check("titles original intact", IoUtil.readText(new File(dir, "titles.list")).startsWith("Outer Banks"));
+
+        // Replace mode keeps a .bak of the original.
+        Options replace = options(dir.getAbsolutePath());
+        replace.setTitlesInPlace(true);
+        replace.setOverwrite(true);
+        OperationResult result2 = cleaner.plan(replace);
+        check("titles replace target", result2.getCleanTitlesTarget().equals(new File(dir, "titles.list")));
+        cleaner.apply(result2, replace);
+        check("titles replaced", (nl + "S1.E1 \u2219 A Side" + nl + "S1.E2 \u2219 B Side" + nl)
+                .equals(nl + IoUtil.readText(new File(dir, "titles.list"))));
+        check("titles bak kept", IoUtil.readText(new File(dir, "titles.list.bak")).startsWith("Outer Banks"));
+    }
+
+    private static void testJson() {
+        java.util.Map<String, Object> root = Json.parseObject(
+                "{\"data\":[{\"attributes\":{\"files\":[{\"file_id\":42,\"file_name\":\"a.en.srt\"}],"
+                + "\"release\":\"x \\\"quoted\\\"\"},\"n\":null,\"count\":123,\"ratio\":1.5,\"flag\":true}],\"ok\":true}");
+        check("json root", root.containsKey("data") && Boolean.TRUE.equals(root.get("ok")));
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> data = (java.util.List<Object>) root.get("data");
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> item = (java.util.Map<String, Object>) data.get(0);
+        check("json null", item.get("n") == null);
+        check("json long", Long.valueOf(123).equals(item.get("count")));
+        check("json double", Double.valueOf(1.5).equals(item.get("ratio")));
+        check("json boolean", Boolean.TRUE.equals(item.get("flag")));
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> attributes = (java.util.Map<String, Object>) item.get("attributes");
+        check("json escape", "x \"quoted\"".equals(attributes.get("release")));
+        @SuppressWarnings("unchecked")
+        java.util.List<Object> files = (java.util.List<Object>) attributes.get("files");
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> file = (java.util.Map<String, Object>) files.get(0);
+        check("json nested", Long.valueOf(42).equals(file.get("file_id")));
+    }
+
+    // ---- download-subs: a tiny local stub of the OpenSubtitles API ----
+
+    private static volatile String stubApiKey;
+    private static volatile boolean stubSawHashSearch;
+    private static volatile boolean stubSawTitleSearch;
+    private static volatile boolean stubHashHit = true;
+    private static volatile int stubPort;
+
+    private static void testDownloadSubs() throws IOException {
+        File dir = tempDir("download");
+        touch(dir, "Outer_Banks_S01_E01.mp4");      // has no subtitle
+        touch(dir, "Outer_Banks_S01_E02.mp4");
+        touch(dir, "Outer_Banks_S01_E02.srt");      // already covered
+
+        final java.net.ServerSocket server = new java.net.ServerSocket(0);
+        stubPort = server.getLocalPort();
+        Thread listener = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (true) {
+                    try {
+                        handleStub(server.accept());
+                    } catch (Exception closed) {
+                        return;
+                    }
+                }
+            }
+        });
+        listener.setDaemon(true);
+        listener.start();
+
+        stubHashHit = true;
+        stubSawHashSearch = false;
+        stubSawTitleSearch = false;
+        stubApiKey = null;
+
+        Options options = options(dir.getAbsolutePath());
+        options.setApiKey("test-key-123");
+        options.setSubsApiBase("http://127.0.0.1:" + stubPort);
+        SubsDownloader downloader = new SubsDownloader();
+
+        OperationResult plan = downloader.plan(options);
+        check("download plan misses one", plan.getMissingVideos() != null && plan.getMissingVideos().size() == 1);
+        check("download plan is offline", planned(plan) == 0);
+
+        downloader.apply(plan, options);
+        File sub = new File(dir, "Outer_Banks_S01_E01.srt");
+        check("download saved next to video", sub.exists());
+        check("download unpacked gzip", IoUtil.readText(sub).contains("Hello"));
+        check("download api key sent", "test-key-123".equals(stubApiKey));
+        check("download searched by hash", stubSawHashSearch && !stubSawTitleSearch);
+
+        // No hash hit -> fall back to a title search with season/episode.
+        stubHashHit = false;
+        stubSawTitleSearch = false;
+        touch(dir, "Outer_Banks_S01_E03.mp4");
+        Options options2 = options(dir.getAbsolutePath());
+        options2.setApiKey("test-key-123");
+        options2.setSubsApiBase("http://127.0.0.1:" + stubPort);
+        OperationResult plan2 = downloader.plan(options2);
+        downloader.apply(plan2, options2);
+        check("download fallback searched by title", stubSawTitleSearch);
+        check("download fallback saved", IoUtil.readText(new File(dir, "Outer_Banks_S01_E03.srt")).contains("Hello"));
+
+        // The OpenSubtitles hash of a known 7-byte fixture ("fixture"):
+        // size 7 + twice the little-endian 64-bit sum of the content.
+        check("download movie hash", Long.parseLong(SubsDownloader.movieHash(new File(dir, "Outer_Banks_S01_E01.mp4"))) > 0);
+        server.close();
+    }
+
+    private static void handleStub(java.net.Socket socket) throws Exception {
+        java.io.InputStream in = socket.getInputStream();
+        StringBuilder head = new StringBuilder();
+        int c;
+        while ((c = in.read()) >= 0) {
+            head.append((char) c);
+            if (head.length() >= 4 && head.substring(head.length() - 4).equals("\r\n\r\n")) break;
+        }
+        String[] lines = head.toString().split("\r\n");
+        String route = lines[0].split(" ")[1];
+        for (String line : lines) {
+            if (line.toLowerCase().startsWith("api-key:")) stubApiKey = line.substring(8).trim();
+        }
+        if (route.startsWith("/api/v1/subtitles")) {
+            boolean byHash = route.contains("moviehash=");
+            if (byHash) stubSawHashSearch = true; else stubSawTitleSearch = true;
+            boolean hit = !byHash || stubHashHit;
+            String json = hit
+                    ? "{\"data\":[{\"attributes\":{\"files\":[{\"file_id\":42,\"file_name\":\"Outer_Banks_S01_E01_English.en.srt\"}]}}]}"
+                    : "{\"data\":[]}";
+            respond(socket, "application/json", json.getBytes("UTF-8"));
+        } else if (route.startsWith("/api/v1/download")) {
+            respond(socket, "application/json",
+                    ("{\"link\":\"http://127.0.0.1:" + stubPort + "/file.en.srt.gz\",\"file_name\":\"Outer_Banks_S01_E01_English.en.srt\"}")
+                            .getBytes("UTF-8"));
+        } else if (route.startsWith("/file.")) {
+            java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+            java.util.zip.GZIPOutputStream gzip = new java.util.zip.GZIPOutputStream(buffer);
+            gzip.write("1\n00:00:01,000 --> 00:00:02,000\nHello!\n".getBytes("UTF-8"));
+            gzip.close();
+            respond(socket, "application/gzip", buffer.toByteArray());
+        } else {
+            respond(socket, "application/json", "{\"error\":\"unknown\"}".getBytes("UTF-8"));
+        }
+    }
+
+    private static void respond(java.net.Socket socket, String type, byte[] body) throws Exception {
+        String header = "HTTP/1.1 200 OK\r\nContent-Type: " + type
+                + "\r\nContent-Length: " + body.length + "\r\nConnection: close\r\n\r\n";
+        socket.getOutputStream().write(header.getBytes("UTF-8"));
+        socket.getOutputStream().write(body);
+        socket.getOutputStream().flush();
+        socket.close();
     }
 
     private static void testFlatten() throws IOException {

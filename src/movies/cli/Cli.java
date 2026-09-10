@@ -13,7 +13,9 @@ import movies.ops.Flattener;
 import movies.ops.HealthCheck;
 import movies.ops.SubsMerger;
 import movies.ops.SubsRelocator;
+import movies.ops.SubsDownloader;
 import movies.ops.SubsShift;
+import movies.ops.TitlesCleaner;
 import movies.ops.SubsSync;
 import movies.ops.VttConvert;
 import movies.util.IoUtil;
@@ -53,6 +55,8 @@ public final class Cli {
         add(new ImdbRenameCommand());
         add(new SyncSubsCommand());
         add(new RelocateSubsCommand());
+        add(new CleanTitlesCommand());
+        add(new DownloadSubsCommand());
         add(new FlattenCommand());
         add(new MergeSubsCommand());
         add(new ConvertVttCommand());
@@ -369,6 +373,88 @@ public final class Cli {
         }
     }
 
+    private static class CleanTitlesCommand implements Command {
+        public String name() { return "clean-titles"; }
+        public String summary() { return "Strip a titles list down to its episode lines"; }
+        public String usage() {
+            return "Usage: movietool clean-titles [-f <titles-file> | -d <folder>] [options]\n"
+                    + "\nKeeps only the episode lines ('S1.E2 \u2219 Title') of a titles list -\n"
+                    + "the show name, 'TV Series', season overviews and other noise are removed.\n"
+                    + "The kept lines are rewritten canonically, deduplicated and (by default)\n"
+                    + "sorted by season/episode. Dry-run by default.\n"
+                    + "  -f, --titles <file>      Titles list (default: <folder>/titles.list)\n"
+                    + "  -d, --dir <folder>       Folder whose titles.list should be cleaned\n"
+                    + "  -o, --out <file>         Write the cleaned list here\n"
+                    + "                           (default: <original>-clean.list next to it)\n"
+                    + "       --replace           Replace the original file instead\n"
+                    + "                           (a .bak copy of it is kept)\n"
+                    + "       --no-sort           Keep the original line order\n"
+                    + "       --apply             Really write (default is a dry run)\n";
+        }
+        public int execute(String[] args) {
+            ArgParser argsParser = new ArgParser(args, aliases(), booleanFlags());
+            Options options = baseOptions(argsParser);
+            options.setTitlesFile(argsParser.joined("titles"));
+            options.setOutput(argsParser.value("out", ""));
+            options.setTitlesInPlace(argsParser.flag("replace"));
+            options.setSortTitles(!argsParser.flag("no-sort"));
+            TitlesCleaner cleaner = new TitlesCleaner();
+            OperationResult result = cleaner.plan(options);
+            if (options.getVerbosity() >= 1 && result.getCleanTitlesContent() != null) {
+                for (String line : result.getCleanTitlesContent().split("\r?\n|\r")) {
+                    if (!line.isEmpty()) System.out.println("  keep: " + line);
+                }
+            }
+            print(result, options);
+            if (!options.isApply()) {
+                System.out.println("Dry run; add --apply to write the cleaned list.");
+                return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+            }
+            cleaner.apply(result, options);
+            print(result, options);
+            return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+        }
+    }
+
+    private static class DownloadSubsCommand implements Command {
+        public String name() { return "download-subs"; }
+        public String summary() { return "Download subtitles for videos that have none (OpenSubtitles)"; }
+        public String usage() {
+            return "Usage: movietool download-subs -d <folder> [options]\n"
+                    + "\nFinds every video without a subtitle and downloads one from\n"
+                    + "OpenSubtitles.com (search by file hash first, then by title), saving each\n"
+                    + "next to its video named exactly like the video. Needs a free API key\n"
+                    + "(opensubtitles.com -> user settings -> API Keys). The dry run is offline:\n"
+                    + "it only lists which videos are missing subtitles.\n"
+                    + "  -d, --dir <folder>       Videos folder\n"
+                    + "  -r, --recursive          Also scan video sub-folders\n"
+                    + "       --lang <code>       Subtitle language (default: en)\n"
+                    + "       --api-key <key>     OpenSubtitles API key (or set the\n"
+                    + "                           OPENSUBTITLES_API_KEY environment variable)\n"
+                    + "       --into-subs-folder  Save into the folder's 'Subtitles' sub-folder\n"
+                    + "                           instead of next to the videos\n"
+                    + "       --apply             Really download (default is a dry run)\n"
+                    + "  -v, --verbose            Show every video checked\n";
+        }
+        public int execute(String[] args) {
+            ArgParser argsParser = new ArgParser(args, aliases(), booleanFlags());
+            Options options = baseOptions(argsParser);
+            options.setSubsLanguage(argsParser.value("lang", "en"));
+            options.setApiKey(argsParser.value("api-key", ""));
+            options.setSubsIntoFolder(argsParser.flag("into-subs-folder"));
+            SubsDownloader downloader = new SubsDownloader();
+            OperationResult result = downloader.plan(options);
+            print(result, options);
+            if (!options.isApply()) {
+                System.out.println("Dry run; add --apply to download the missing subtitles.");
+                return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+            }
+            downloader.apply(result, options);
+            print(result, options);
+            return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+        }
+    }
+
     private static class SyncSubsCommand implements Command {
         public String name() { return "sync-subs"; }
         public String summary() { return "Copy/move subtitles next to their matching videos"; }
@@ -634,6 +720,11 @@ public final class Cli {
         aliases.put("style", "--style");
         aliases.put("tag", "--tag");
         aliases.put("no-tag", "--no-tag");
+        aliases.put("lang", "--lang");
+        aliases.put("api-key", "--api-key");
+        aliases.put("into-subs-folder", "--into-subs-folder");
+        aliases.put("replace", "--replace");
+        aliases.put("no-sort", "--no-sort");
         aliases.put("replace-with", "--replace-with");
         aliases.put("top", "--top");
         aliases.put("verbose", "--verbose,-v");
@@ -646,6 +737,7 @@ public final class Cli {
     private static Set<String> booleanFlags() {
         return new HashSet<String>(Arrays.asList(
                 "recursive", "recursive-videos", "apply", "overwrite", "move", "csv", "top",
-                "verbose", "quiet", "no-backup", "backup", "no-tag"));
+                "verbose", "quiet", "no-backup", "backup", "no-tag",
+                "into-subs-folder", "replace", "no-sort"));
     }
 }

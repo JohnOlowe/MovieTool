@@ -74,6 +74,27 @@ public class Options {
     /** How talky the console/log output should be (0 = quiet, 1 = normal, 2 = debug). */
     private int verbosity = 1;
 
+    /** Clean-titles: replace the original titles list instead of writing
+     *  a new <name>-clean.list file next to it. */
+    private boolean titlesInPlace;
+
+    /** Clean-titles: sort the kept lines by season/episode (default on). */
+    private boolean sortTitles = true;
+
+    /** OpenSubtitles API key (download-subs); falls back to the
+     *  OPENSUBTITLES_API_KEY environment variable. */
+    private String apiKey = "";
+
+    /** Subtitle language for the download-subs operation (ISO code). */
+    private String subsLanguage = "en";
+
+    /** API base for download-subs (overridable for the offline tests). */
+    private String subsApiBase = "https://api.opensubtitles.com";
+
+    /** download-subs: put subtitles into the folder's 'Subtitles' sub-folder
+     *  instead of next to their videos. */
+    private boolean subsIntoFolder;
+
     public String getFolder() { return folder; }
     public void setFolder(String folder) { this.folder = folder == null ? "" : folder; }
 
@@ -139,4 +160,25 @@ public class Options {
 
     /** Convenience for builders/CLI: is a custom pattern configured? */
     public boolean hasPattern() { return pattern != null && !pattern.trim().isEmpty(); }
+
+    /** Default name of the titles list file. */
+    public static final String DEFAULT_TITLES_NAME = "titles.list";
+
+    public boolean isTitlesInPlace() { return titlesInPlace; }
+    public void setTitlesInPlace(boolean titlesInPlace) { this.titlesInPlace = titlesInPlace; }
+
+    public boolean isSortTitles() { return sortTitles; }
+    public void setSortTitles(boolean sortTitles) { this.sortTitles = sortTitles; }
+
+    public String getApiKey() { return apiKey == null ? "" : apiKey; }
+    public void setApiKey(String apiKey) { this.apiKey = apiKey == null ? "" : apiKey.trim(); }
+
+    public String getSubsLanguage() { return subsLanguage == null || subsLanguage.trim().isEmpty() ? "en" : subsLanguage.trim(); }
+    public void setSubsLanguage(String subsLanguage) { this.subsLanguage = subsLanguage; }
+
+    public String getSubsApiBase() { return subsApiBase == null ? "https://api.opensubtitles.com" : subsApiBase; }
+    public void setSubsApiBase(String subsApiBase) { this.subsApiBase = subsApiBase; }
+
+    public boolean isSubsIntoFolder() { return subsIntoFolder; }
+    public void setSubsIntoFolder(boolean subsIntoFolder) { this.subsIntoFolder = subsIntoFolder; }
 }
