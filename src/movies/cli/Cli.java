@@ -424,13 +424,21 @@ public final class Cli {
                     + "\nFinds every video without a subtitle and downloads one from\n"
                     + "OpenSubtitles.com (search by file hash first, then by title), saving each\n"
                     + "next to its video named exactly like the video. Needs a free API key\n"
-                    + "(opensubtitles.com -> user settings -> API Keys). The dry run is offline:\n"
+                    + "(opensubtitles.com -> profile -> API Consumers). The dry run is offline:\n"
                     + "it only lists which videos are missing subtitles.\n"
+                    + "\nQuotas (per day): OpenSubtitles 5 with the key alone, 20 with your free\n"
+                    + "account (--os-user/--os-pass), 1000 with VIP; a free SubDL key adds 50\n"
+                    + "more - when OpenSubtitles finds nothing or is out of quota, SubDL is\n"
+                    + "tried automatically.\n"
                     + "  -d, --dir <folder>       Videos folder\n"
                     + "  -r, --recursive          Also scan video sub-folders\n"
                     + "       --lang <code>       Subtitle language (default: en)\n"
-                    + "       --api-key <key>     OpenSubtitles API key (or set the\n"
-                    + "                           OPENSUBTITLES_API_KEY environment variable)\n"
+                    + "       --api-key <key>     OpenSubtitles API key (or OPENSUBTITLES_API_KEY)\n"
+                    + "       --os-user <name>    OpenSubtitles username - raises the quota\n"
+                    + "                           to 20/day (or OPENSUBTITLES_USER)\n"
+                    + "       --os-pass <pass>    OpenSubtitles password (or OPENSUBTITLES_PASSWORD)\n"
+                    + "       --subdl-key <key>   SubDL fallback key, free at subdl.com\n"
+                    + "                           (or SUBDL_API_KEY) - adds 50 downloads/day\n"
                     + "       --into-subs-folder  Save into the folder's 'Subtitles' sub-folder\n"
                     + "                           instead of next to the videos\n"
                     + "       --apply             Really download (default is a dry run)\n"
@@ -441,6 +449,9 @@ public final class Cli {
             Options options = baseOptions(argsParser);
             options.setSubsLanguage(argsParser.value("lang", "en"));
             options.setApiKey(argsParser.value("api-key", ""));
+            options.setOsUser(argsParser.value("os-user", ""));
+            options.setOsPassword(argsParser.value("os-pass", ""));
+            options.setSubdlApiKey(argsParser.value("subdl-key", ""));
             options.setSubsIntoFolder(argsParser.flag("into-subs-folder"));
             SubsDownloader downloader = new SubsDownloader();
             OperationResult result = downloader.plan(options);
@@ -724,6 +735,9 @@ public final class Cli {
         aliases.put("api-key", "--api-key");
         aliases.put("into-subs-folder", "--into-subs-folder");
         aliases.put("replace", "--replace");
+        aliases.put("os-user", "--os-user");
+        aliases.put("os-pass", "--os-pass");
+        aliases.put("subdl-key", "--subdl-key");
         aliases.put("no-sort", "--no-sort");
         aliases.put("replace-with", "--replace-with");
         aliases.put("top", "--top");

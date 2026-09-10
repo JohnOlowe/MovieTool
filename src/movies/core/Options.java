@@ -95,6 +95,19 @@ public class Options {
      *  instead of next to their videos. */
     private boolean subsIntoFolder;
 
+    /** OpenSubtitles account (optional): logging in raises the personal
+     *  download quota from 5/day (key only) to 20/day on a free account. */
+    private String osUser = "";
+    private String osPassword = "";
+
+    /** SubDL (subdl.com) as a fallback provider: a free key downloads
+     *  50 subtitles per day on top of the OpenSubtitles quota. */
+    private String subdlApiKey = "";
+
+    /** API/download bases for SubDL (overridable for the offline tests). */
+    private String subdlApiBase = "https://api.subdl.com";
+    private String subdlDownloadBase = "https://dl.subdl.com";
+
     public String getFolder() { return folder; }
     public void setFolder(String folder) { this.folder = folder == null ? "" : folder; }
 
@@ -181,4 +194,19 @@ public class Options {
 
     public boolean isSubsIntoFolder() { return subsIntoFolder; }
     public void setSubsIntoFolder(boolean subsIntoFolder) { this.subsIntoFolder = subsIntoFolder; }
+
+    public String getOsUser() { return osUser == null ? "" : osUser.trim(); }
+    public void setOsUser(String osUser) { this.osUser = osUser; }
+
+    public String getOsPassword() { return osPassword == null ? "" : osPassword; }
+    public void setOsPassword(String osPassword) { this.osPassword = osPassword; }
+
+    public String getSubdlApiKey() { return subdlApiKey == null ? "" : subdlApiKey.trim(); }
+    public void setSubdlApiKey(String subdlApiKey) { this.subdlApiKey = subdlApiKey; }
+
+    public String getSubdlApiBase() { return subdlApiBase == null ? "https://api.subdl.com" : subdlApiBase; }
+    public void setSubdlApiBase(String subdlApiBase) { this.subdlApiBase = subdlApiBase; }
+
+    public String getSubdlDownloadBase() { return subdlDownloadBase == null ? "https://dl.subdl.com" : subdlDownloadBase; }
+    public void setSubdlDownloadBase(String subdlDownloadBase) { this.subdlDownloadBase = subdlDownloadBase; }
 }

@@ -582,12 +582,15 @@ public final class SelfTest {
         check("json nested", Long.valueOf(42).equals(file.get("file_id")));
     }
 
-    // ---- download-subs: a tiny local stub of the OpenSubtitles API ----
+    // ---- download-subs: a tiny local stub of the OpenSubtitles + SubDL APIs ----
 
     private static volatile String stubApiKey;
+    private static volatile String stubAuth;
+    private static volatile String stubSubdlKey;
     private static volatile boolean stubSawHashSearch;
     private static volatile boolean stubSawTitleSearch;
-    private static volatile boolean stubHashHit = true;
+    private static volatile boolean stubOsHits = true;
+    private static volatile boolean stubOsQuota;
     private static volatile int stubPort;
 
     private static void testDownloadSubs() throws IOException {
@@ -613,14 +616,16 @@ public final class SelfTest {
         listener.setDaemon(true);
         listener.start();
 
-        stubHashHit = true;
-        stubSawHashSearch = false;
-        stubSawTitleSearch = false;
-        stubApiKey = null;
+        String base = "http://127.0.0.1:" + stubPort;
+
+        // 1. OpenSubtitles hash hit, no credentials: saved next to the video.
+        stubOsHits = true; stubOsQuota = false;
+        stubSawHashSearch = false; stubSawTitleSearch = false;
+        stubApiKey = null; stubAuth = null; stubSubdlKey = null;
 
         Options options = options(dir.getAbsolutePath());
         options.setApiKey("test-key-123");
-        options.setSubsApiBase("http://127.0.0.1:" + stubPort);
+        options.setSubsApiBase(base);
         SubsDownloader downloader = new SubsDownloader();
 
         OperationResult plan = downloader.plan(options);
@@ -633,21 +638,45 @@ public final class SelfTest {
         check("download unpacked gzip", IoUtil.readText(sub).contains("Hello"));
         check("download api key sent", "test-key-123".equals(stubApiKey));
         check("download searched by hash", stubSawHashSearch && !stubSawTitleSearch);
+        check("download no token sent", stubAuth == null);
 
-        // No hash hit -> fall back to a title search with season/episode.
-        stubHashHit = false;
-        stubSawTitleSearch = false;
-        touch(dir, "Outer_Banks_S01_E03.mp4");
-        Options options2 = options(dir.getAbsolutePath());
-        options2.setApiKey("test-key-123");
-        options2.setSubsApiBase("http://127.0.0.1:" + stubPort);
-        OperationResult plan2 = downloader.plan(options2);
-        downloader.apply(plan2, options2);
-        check("download fallback searched by title", stubSawTitleSearch);
-        check("download fallback saved", IoUtil.readText(new File(dir, "Outer_Banks_S01_E03.srt")).contains("Hello"));
+        // 2. With account credentials the Bearer token from /login is sent.
+        stubSawHashSearch = false;
+        stubAuth = null;
+        touch(dir, "Outer_Banks_S01_E06.mp4");
+        Options withLogin = options(dir.getAbsolutePath());
+        withLogin.setApiKey("test-key-123");
+        withLogin.setSubsApiBase(base);
+        withLogin.setOsUser("john");
+        withLogin.setOsPassword("secret");
+        downloader.apply(downloader.plan(withLogin), withLogin);
+        check("download login token used", "Bearer stub-token-xyz".equals(stubAuth));
 
-        // The OpenSubtitles hash of a known 7-byte fixture ("fixture"):
-        // size 7 + twice the little-endian 64-bit sum of the content.
+        // 3. OpenSubtitles has no match -> the SubDL fallback delivers.
+        stubOsHits = false;
+        touch(dir, "Outer_Banks_S01_E04.mp4");
+        Options withSubdl = options(dir.getAbsolutePath());
+        withSubdl.setApiKey("test-key-123");
+        withSubdl.setSubsApiBase(base);
+        withSubdl.setSubdlApiKey("subdl-key-9");
+        withSubdl.setSubdlApiBase(base);
+        withSubdl.setSubdlDownloadBase(base);
+        downloader.apply(downloader.plan(withSubdl), withSubdl);
+        check("download subdl fallback saved", IoUtil.readText(new File(dir, "Outer_Banks_S01_E04.srt")).contains("Hello-SubDL"));
+        check("download subdl key used", "subdl-key-9".equals(stubSubdlKey));
+
+        // 4. OpenSubtitles quota exhausted (406) -> falls back instead of stopping.
+        stubOsQuota = true;
+        touch(dir, "Outer_Banks_S01_E05.mp4");
+        Options quota = options(dir.getAbsolutePath());
+        quota.setApiKey("test-key-123");
+        quota.setSubsApiBase(base);
+        quota.setSubdlApiKey("subdl-key-9");
+        quota.setSubdlApiBase(base);
+        quota.setSubdlDownloadBase(base);
+        downloader.apply(downloader.plan(quota), quota);
+        check("download quota fallback saved", IoUtil.readText(new File(dir, "Outer_Banks_S01_E05.srt")).contains("Hello-SubDL"));
+
         check("download movie hash", Long.parseLong(SubsDownloader.movieHash(new File(dir, "Outer_Banks_S01_E01.mp4"))) > 0);
         server.close();
     }
@@ -663,13 +692,36 @@ public final class SelfTest {
         String[] lines = head.toString().split("\r\n");
         String route = lines[0].split(" ")[1];
         for (String line : lines) {
-            if (line.toLowerCase().startsWith("api-key:")) stubApiKey = line.substring(8).trim();
+            String lower = line.toLowerCase();
+            if (lower.startsWith("api-key:")) stubApiKey = line.substring(8).trim();
+            if (lower.startsWith("authorization:")) stubAuth = line.substring(14).trim();
         }
-        if (route.startsWith("/api/v1/subtitles")) {
+        if (route.startsWith("/api/v1/login")) {
+            respond(socket, "application/json", "{\"token\":\"stub-token-xyz\"}".getBytes("UTF-8"));
+        } else if (route.startsWith("/api/v1/subtitles") && (route.contains("file_name=") || route.contains("film_name="))) {
+            // SubDL search.
+            stubSubdlKey = queryParam(route, "api_key");
+            String json = "{\"status\":true,\"subtitles\":[{\"name\":\"Outer_Banks_S01_E01.srt.zip\","
+                    + "\"url\":\"/subtitle/999.zip\",\"full_season\":false,\"season\":1,\"episode\":1,"
+                    + "\"unpack_files\":[{\"file_n_id\":\"f1\",\"name\":\"Outer_Banks_S01_E01_English.srt\","
+                    + "\"season\":1,\"episode\":1,\"format\":\"srt\",\"url\":\"/subtitle/parent/f1\"}]}]}";
+            respond(socket, "application/json", json.getBytes("UTF-8"));
+        } else if (route.startsWith("/api/v1/subtitles")) {
+            // OpenSubtitles search.
             boolean byHash = route.contains("moviehash=");
             if (byHash) stubSawHashSearch = true; else stubSawTitleSearch = true;
-            boolean hit = !byHash || stubHashHit;
-            String json = hit
+            if (stubOsQuota) {
+                String body = "{\"message\":\"daily download limit reached\"}";
+                byte[] out = body.getBytes("UTF-8");
+                String header = "HTTP/1.1 406 Not Acceptable\r\nContent-Type: application/json"
+                        + "\r\nContent-Length: " + out.length + "\r\nConnection: close\r\n\r\n";
+                socket.getOutputStream().write(header.getBytes("UTF-8"));
+                socket.getOutputStream().write(out);
+                socket.getOutputStream().flush();
+                socket.close();
+                return;
+            }
+            String json = stubOsHits
                     ? "{\"data\":[{\"attributes\":{\"files\":[{\"file_id\":42,\"file_name\":\"Outer_Banks_S01_E01_English.en.srt\"}]}}]}"
                     : "{\"data\":[]}";
             respond(socket, "application/json", json.getBytes("UTF-8"));
@@ -683,9 +735,30 @@ public final class SelfTest {
             gzip.write("1\n00:00:01,000 --> 00:00:02,000\nHello!\n".getBytes("UTF-8"));
             gzip.close();
             respond(socket, "application/gzip", buffer.toByteArray());
+        } else if (route.startsWith("/subtitle/999.zip")) {
+            java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+            java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(buffer);
+            zip.putNextEntry(new java.util.zip.ZipEntry("packed.srt"));
+            zip.write("1\n00:00:01,000 --> 00:00:02,000\nHello-Zip!\n".getBytes("UTF-8"));
+            zip.closeEntry();
+            zip.close();
+            respond(socket, "application/zip", buffer.toByteArray());
+        } else if (route.startsWith("/subtitle/parent/f1")) {
+            respond(socket, "application/x-subrip",
+                    "1\n00:00:01,000 --> 00:00:02,000\nHello-SubDL!\n".getBytes("UTF-8"));
         } else {
             respond(socket, "application/json", "{\"error\":\"unknown\"}".getBytes("UTF-8"));
         }
+    }
+
+    private static String queryParam(String route, String name) {
+        int q = route.indexOf('?');
+        if (q < 0) return null;
+        for (String pair : route.substring(q + 1).split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0 && pair.substring(0, eq).equals(name)) return pair.substring(eq + 1);
+        }
+        return null;
     }
 
     private static void respond(java.net.Socket socket, String type, byte[] body) throws Exception {

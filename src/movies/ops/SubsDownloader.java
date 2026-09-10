@@ -46,11 +46,23 @@ import java.util.zip.ZipInputStream;
  *
  * <p>Dry run (the default) works offline: it only lists the videos that have
  * no subtitle yet. Applying does the network work.</p>
+ *
+ * <p>Quotas (free tiers): OpenSubtitles allows 5 downloads/day with the API
+ * key alone and 20/day once the OpenSubtitles account is given (this class
+ * logs in and sends the Bearer token automatically); VIP accounts get
+ * 1000/day. As a fallback provider a free SubDL key (subdl.com) adds
+ * 50 downloads/day - when OpenSubtitles has no match or its quota is used
+ * up, SubDL is tried automatically.</p>
  */
 public class SubsDownloader {
 
     private static final String[] VIDEO_EXTENSIONS = { ".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts" };
     private static final String[] SUBTITLE_EXTENSIONS = { ".srt", ".vtt", ".ass", ".ssa", ".sub" };
+
+    /** Bearer token from the OpenSubtitles /login call (this apply() run). */
+    private String bearerToken;
+    /** Set when OpenSubtitles reports the daily download quota is used up. */
+    private boolean osQuotaExhausted;
 
     /** Where a video's subtitle belongs (and is looked for). */
     private File subtitleTarget(Options options, File video) {
@@ -133,6 +145,13 @@ public class SubsDownloader {
             return;
         }
 
+        try {
+            bearerToken = login(options, apiKey);
+        } catch (IOException e) {
+            result.add(Problem.warn("OpenSubtitles login failed: " + rootMessage(e)
+                    + " - continuing with the key-only quota."));
+        }
+
         int done = 0;
         int failed = 0;
         for (File video : missing) {
@@ -166,10 +185,37 @@ public class SubsDownloader {
     // --------------------------------------------------------------- search
 
     private File downloadFor(Options options, String apiKey, File video, File target) throws IOException {
-        Map<String, Object> release = findByHash(options, apiKey, video);
-        if (release == null) release = findByTitle(options, apiKey, video);
-        if (release == null) return null;
+        boolean quotaHit = false;
+        if (!osQuotaExhausted) {
+            Map<String, Object> release;
+            try {
+                release = findByHash(options, apiKey, video);
+                if (release == null) release = findByTitle(options, apiKey, video);
+            } catch (QuotaException e) {
+                osQuotaExhausted = true;
+                quotaHit = true;
+                release = null;
+            }
+            if (release != null) {
+                File downloaded = downloadOpenSubtitles(options, apiKey, release, target);
+                if (downloaded != null) return downloaded;
+            }
+        }
+        // Fallback provider (or the only one left when the quota is gone).
+        if (!options.getSubdlApiKey().isEmpty()) {
+            File viaSubdl = downloadViaSubdl(options, video, target);
+            if (viaSubdl != null) return viaSubdl;
+        }
+        if (quotaHit) {
+            throw new QuotaException("OpenSubtitles daily download quota reached"
+                    + (options.getSubdlApiKey().isEmpty() ? " (a free SubDL key would add 50 downloads/day)"
+                                                          : " and SubDL had no match"));
+        }
+        return null;
+    }
 
+    private File downloadOpenSubtitles(Options options, String apiKey,
+                                       Map<String, Object> release, File target) throws IOException {
         Map<String, Object> file = pickSubtitleFile(release);
         if (file == null) return null;
         Object fileId = file.get("file_id");
@@ -192,6 +238,146 @@ public class SubsDownloader {
         IoUtil.mkdirs(finalTarget.getParentFile());
         IoUtil.writeAll(finalTarget, unpacked);
         return finalTarget;
+    }
+
+    // -------------------------------------------------------------- SubDL
+
+    /**
+     * Free fallback provider: subdl.com (2,000 searches + 50 downloads per
+     * day with the free key). Searches by file name first, then by film
+     * name; for series the per-episode files of a pack are preferred.
+     */
+    private File downloadViaSubdl(Options options, File video, File target) throws IOException {
+        String key = options.getSubdlApiKey();
+        String language = options.getSubsLanguage().toUpperCase(Locale.ROOT);
+        FileNameParts parts = NameResolver.resolve(video, new ConventionRegistry(), new ConventionRegistry().selected(""));
+        boolean series = parts != null && parts.isEpisode();
+
+        String query = options.getSubdlApiBase() + "/api/v1/subtitles?api_key="
+                + URLEncoder.encode(key, "UTF-8")
+                + "&file_name=" + URLEncoder.encode(video.getName(), "UTF-8")
+                + "&languages=" + URLEncoder.encode(language, "UTF-8")
+                + "&unpack=1&subs_per_page=10";
+        Map<String, Object> response = Json.parseObject(get(query, null));
+        List<Map<String, Object>> subtitles = subdlSubtitles(response);
+        if (subtitles.isEmpty()) {
+            String title = parsedTitle(video);
+            if (!title.isEmpty()) {
+                StringBuilder url = new StringBuilder(options.getSubdlApiBase());
+                url.append("/api/v1/subtitles?api_key=").append(URLEncoder.encode(key, "UTF-8"));
+                url.append("&film_name=").append(URLEncoder.encode(title, "UTF-8"));
+                url.append("&languages=").append(URLEncoder.encode(language, "UTF-8"));
+                url.append("&unpack=1&subs_per_page=10");
+                if (series) {
+                    url.append("&type=tv&season_number=").append(parts.getSeason());
+                    url.append("&episode_number=").append(parts.getEpisode());
+                } else {
+                    url.append("&type=movie");
+                    if (parts != null && parts.getYear() > 0) url.append("&year=").append(parts.getYear());
+                }
+                response = Json.parseObject(get(url.toString(), null));
+                subtitles = subdlSubtitles(response);
+            }
+        }
+
+        Map<String, Object> chosen = pickSubdl(subtitles, series && parts != null ? parts.getSeason() : -1,
+                series ? parts.getEpisode() : -1);
+        if (chosen == null) return null;
+
+        String insideUrl = String.valueOf(chosen.get("url"));
+        byte[] bytes = fetch(options.getSubdlDownloadBase() + insideUrl);
+        String name = chosen.get("name") instanceof String ? (String) chosen.get("name") : null;
+        byte[] unpacked = unpack(bytes, name);
+        String extension = extensionOf(name, unpacked);
+
+        File finalTarget = new File(target.getParentFile(), IoUtil.baseName(target.getName()) + extension);
+        IoUtil.mkdirs(finalTarget.getParentFile());
+        IoUtil.writeAll(finalTarget, unpacked);
+        return finalTarget;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> subdlSubtitles(Map<String, Object> response) {
+        List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
+        Object status = response.get("status");
+        if (Boolean.FALSE.equals(status)) return out;
+        Object subtitles = response.get("subtitles");
+        if (!(subtitles instanceof List)) return out;
+        for (Object item : (List<Object>) subtitles) {
+            if (item instanceof Map && ((Map<?, ?>) item).get("url") != null) {
+                out.add((Map<String, Object>) item);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Chooses a subtitle: exact season/episode per-episode files of a pack
+     * first, then any per-episode file, then non-full-season entries, then
+     * anything at all.
+     */
+    private static Map<String, Object> pickSubdl(List<Map<String, Object>> subtitles, int season, int episode) {
+        Map<String, Object> anyEpisodeFile = null;
+        Map<String, Object> plain = null;
+        Map<String, Object> any = null;
+        for (Map<String, Object> sub : subtitles) {
+            Object unpackFiles = sub.get("unpack_files");
+            if (unpackFiles instanceof List) {
+                for (Object item : (List<?>) unpackFiles) {
+                    if (!(item instanceof Map)) continue;
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> file = (Map<String, Object>) item;
+                    if (file.get("url") == null) continue;
+                    if (any == null) any = file;
+                    if (anyEpisodeFile == null) anyEpisodeFile = file;
+                    int fileSeason = intOf(file.get("season"));
+                    int fileEpisode = intOf(file.get("episode"));
+                    if (season > 0 && fileSeason == season && episode > 0 && fileEpisode == episode) return file;
+                }
+            }
+            boolean fullSeason = Boolean.TRUE.equals(sub.get("full_season"));
+            if (!fullSeason && plain == null) plain = sub;
+            if (any == null) any = sub;
+        }
+        if (anyEpisodeFile != null) return anyEpisodeFile;
+        if (plain != null) return plain;
+        return any;
+    }
+
+    private static int intOf(Object value) {
+        if (value instanceof Number) return ((Number) value).intValue();
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    // --------------------------------------------------------------- login
+
+    /**
+     * OpenSubtitles /login: exchanges the account's username/password for a
+     * Bearer token that carries the ACCOUNT's daily quota (20/day free,
+     * 1000/day VIP) instead of the 5/day key-only quota. Returns "" when no
+     * credentials are configured.
+     */
+    private String login(Options options, String apiKey) throws IOException {
+        String user = options.getOsUser();
+        String password = options.getOsPassword();
+        if (user.isEmpty()) user = env("OPENSUBTITLES_USER");
+        if (password.isEmpty()) password = env("OPENSUBTITLES_PASSWORD");
+        if (user.isEmpty() || password.isEmpty()) return "";
+        Map<String, Object> response = Json.parseObject(post(
+                options.getSubsApiBase() + "/api/v1/login",
+                "{\"username\":\"" + Json.escape(user) + "\",\"password\":\"" + Json.escape(password) + "\"}",
+                apiKey));
+        Object token = response.get("token");
+        return token instanceof String ? (String) token : "";
+    }
+
+    private static String env(String name) {
+        String value = System.getenv(name);
+        return value == null ? "" : value.trim();
     }
 
     /** Search by the OpenSubtitles file hash - exact release match. */
@@ -395,22 +581,25 @@ public class SubsDownloader {
         QuotaException(String message) { super(message); }
     }
 
-    private static String get(String url, String apiKey) throws IOException {
+    private String get(String url, String apiKey) throws IOException {
         return request("GET", url, apiKey, null);
     }
 
-    private static String post(String url, String body, String apiKey) throws IOException {
+    private String post(String url, String body, String apiKey) throws IOException {
         return request("POST", url, apiKey, body);
     }
 
-    private static String request(String method, String url, String apiKey, String body) throws IOException {
+    private String request(String method, String url, String apiKey, String body) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setRequestMethod(method);
         connection.setConnectTimeout(15000);
         connection.setReadTimeout(30000);
         connection.setRequestProperty("Accept", "application/json");
-        connection.setRequestProperty("Api-Key", apiKey);
-        connection.setRequestProperty("User-Agent", "MovieTool/v2.3");
+        if (apiKey != null && !apiKey.isEmpty()) connection.setRequestProperty("Api-Key", apiKey);
+        if (bearerToken != null && !bearerToken.isEmpty()) {
+            connection.setRequestProperty("Authorization", "Bearer " + bearerToken);
+        }
+        connection.setRequestProperty("User-Agent", "MovieTool/v2.4");
         if (body != null) {
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", "application/json");
@@ -434,7 +623,7 @@ public class SubsDownloader {
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setConnectTimeout(15000);
         connection.setReadTimeout(60000);
-        connection.setRequestProperty("User-Agent", "MovieTool/v2.3");
+        connection.setRequestProperty("User-Agent", "MovieTool/v2.4");
         int code = connection.getResponseCode();
         if (code != 200) throw new IOException("HTTP " + code + " while downloading the subtitle file");
         InputStream in = connection.getInputStream();

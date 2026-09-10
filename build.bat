@@ -49,7 +49,7 @@ rem --------------------------------------------------------------------- pack
 (
 echo Manifest-Version: 1.0
 echo Implementation-Title: MovieTool
-echo Implementation-Version: 2.3.0
+echo Implementation-Version: 2.4.0
 echo Main-Class: movies.Main
 echo.
 ) > build\MANIFEST.MF

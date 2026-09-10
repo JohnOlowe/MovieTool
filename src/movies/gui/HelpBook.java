@@ -109,15 +109,18 @@ final class HelpBook {
 
     private static void download(StringBuilder sb) {
         sb.append("<h4>Download subtitles</h4><p>For series or movies that came without subtitles: "
-                + "tick this card, press <b>Run</b> to see which videos have no subtitle, then "
-                + "<b>Apply</b> to fetch them in bulk from OpenSubtitles.com. Each download is named "
-                + "exactly like its video (e.g. <font face=\"monospace\">Outer_Banks_S01_E01.mp4</font> "
-                + "&rarr; <font face=\"monospace\">Outer_Banks_S01_E01.srt</font>) so every player picks "
-                + "it up; with 'put into Subtitles folder' they land there instead. Matching is by the "
-                + "file's unique hash first (exact release even for gibberish names), then by title "
-                + "with season/episode. <b>You need a free API key</b>: register at opensubtitles.com, "
-                + "open user settings &rarr; API Keys, paste the key once and tick 'remember' - free "
-                + "accounts have a daily download quota, which the tool reports politely.</p>");
+                + "press <b>Run</b> to see which videos have no subtitle, then <b>Apply</b> to fetch them "
+                + "in bulk and name each one exactly like its video "
+                + "(<font face=\"monospace\">Outer_Banks_S01_E01.mp4</font> &rarr; "
+                + "<font face=\"monospace\">Outer_Banks_S01_E01.srt</font>), next to the video or in the "
+                + "Subtitles folder. Matching is by the file's unique hash first (exact release even for "
+                + "gibberish names), then by title with season/episode. "
+                + "<b>Keys and free daily quotas:</b> OpenSubtitles.com - register, profile &rarr; "
+                + "API Consumers &rarr; create a key: 5 downloads/day with the key alone, <b>20/day</b> "
+                + "if you also enter your OpenSubtitles username + password; VIP (~$10/yr) raises it to "
+                + "1000/day. <b>SubDL</b> (subdl.com &rarr; panel &rarr; API) is used automatically as a "
+                + "fallback when OpenSubtitles finds nothing or is out of quota: a free key adds "
+                + "<b>50 downloads/day</b>. Keys can be remembered on this computer (never the password).</p>");
     }
 
     private static void flatten(StringBuilder sb) {

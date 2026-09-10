@@ -507,12 +507,21 @@ final class Cards {
 
     static final class DownloadSubsCard extends PlanCard {
         private static final String PREF_KEY = "opensubtitles.apikey";
+        private static final String PREF_USER = "opensubtitles.user";
+        private static final String PREF_SUBDL = "subdl.apikey";
         private final Form form = new Form();
         private final JTextField dir = form.addPathField("Videos folder:", true);
         private final JTextField language = form.addTextField("Subtitle language:", "ISO code, e.g. en");
         private final JTextField apiKey = form.addTextField("OpenSubtitles API key:",
-                "free: opensubtitles.com -> user settings -> API Keys");
-        private final JCheckBox remember = form.addCheckbox("Remember the API key on this computer", true);
+                "free: opensubtitles.com -> profile -> API Consumers");
+        private final JTextField osUser = form.addTextField("OpenSubtitles username:",
+                "optional; with password it raises the quota from 5 to 20 downloads/day");
+        private final javax.swing.JPasswordField osPassword = new javax.swing.JPasswordField(32);
+        { form.addRow("OpenSubtitles password:", osPassword,
+                new JLabel("kept only for this session; free account = 20 downloads/day, VIP 1000")); }
+        private final JTextField subdlKey = form.addTextField("SubDL API key (fallback):",
+                "optional; free at subdl.com - adds 50 downloads/day when OpenSubtitles can't deliver");
+        private final JCheckBox remember = form.addCheckbox("Remember keys and username on this computer", true);
         private final JCheckBox recursive = form.addCheckbox("Scan video sub-folders", true);
         private final JCheckBox intoFolder = form.addCheckbox("Put downloads into the 'Subtitles' folder", false);
         private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
@@ -520,12 +529,16 @@ final class Cards {
         private volatile OperationResult lastResult;
 
         DownloadSubsCard() {
-            super("Download subtitles", "Bulk-download subtitles for videos that have none (OpenSubtitles.com) and name each one exactly like its video. Needs a free API key.");
+            super("Download subtitles", "Bulk-download subtitles for videos that have none (OpenSubtitles.com, SubDL as fallback) and name each one exactly like its video. Free quotas: 5/day with an OpenSubtitles key, 20/day with your account, +50/day with a SubDL key.");
             language.setText("en");
-            String saved = Preferences.userNodeForPackage(Cards.class).get(PREF_KEY, "");
-            if (!saved.isEmpty()) {
-                apiKey.setText(saved);
-            } else {
+            Preferences prefs = Preferences.userNodeForPackage(Cards.class);
+            String saved = prefs.get(PREF_KEY, "");
+            String savedUser = prefs.get(PREF_USER, "");
+            String savedSubdl = prefs.get(PREF_SUBDL, "");
+            if (!saved.isEmpty()) apiKey.setText(saved);
+            if (!savedUser.isEmpty()) osUser.setText(savedUser);
+            if (!savedSubdl.isEmpty()) subdlKey.setText(savedSubdl);
+            if (saved.isEmpty() && savedUser.isEmpty() && savedSubdl.isEmpty()) {
                 remember.setSelected(false);
             }
         }
@@ -541,12 +554,20 @@ final class Cards {
             options.setRecursive(recursive.isSelected());
             options.setSubsLanguage(language.getText().trim());
             options.setApiKey(apiKey.getText().trim());
+            options.setOsUser(osUser.getText().trim());
+            options.setOsPassword(new String(osPassword.getPassword()));
+            options.setSubdlApiKey(subdlKey.getText().trim());
             options.setSubsIntoFolder(intoFolder.isSelected());
             options.setDryRun(dryRun.isSelected());
-            if (remember.isSelected() && !options.getApiKey().isEmpty()) {
-                Preferences.userNodeForPackage(Cards.class).put(PREF_KEY, options.getApiKey());
-            } else if (!remember.isSelected()) {
-                Preferences.userNodeForPackage(Cards.class).remove(PREF_KEY);
+            Preferences prefs = Preferences.userNodeForPackage(Cards.class);
+            if (remember.isSelected()) {
+                if (!options.getApiKey().isEmpty()) prefs.put(PREF_KEY, options.getApiKey());
+                if (!options.getOsUser().isEmpty()) prefs.put(PREF_USER, options.getOsUser());
+                if (!options.getSubdlApiKey().isEmpty()) prefs.put(PREF_SUBDL, options.getSubdlApiKey());
+            } else {
+                prefs.remove(PREF_KEY);
+                prefs.remove(PREF_USER);
+                prefs.remove(PREF_SUBDL);
             }
         }
 

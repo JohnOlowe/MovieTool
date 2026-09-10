@@ -33,7 +33,7 @@ recompiling just to point the tool at a different folder.
 | **Sync subtitles** | The tool's core job: match subtitle files to their videos (episode-aware, even across different naming conventions) and put each subtitle next to its video, named exactly like the video. Subtitles living inside per-episode download folders are found too. A `Subtitles` folder inside the videos folder is picked up automatically. Copy or move, with overwrite control. |
 | **Collect subtitles** | The reverse of Sync: move subtitles that sit outside the `Subtitles` sub-folder into it, keeping their names. Loose files go into `Subtitles` directly; per-episode folders that contain only subtitles move **whole** (the subtitle stays inside its folder); folders that also contain videos keep the videos, their subtitles grouped under `Subtitles/<folder name>/`. |
 | **Clean titles list** | Strip `titles.list` down to its episode lines: show name, `TV Series` and other copied noise are removed; the kept lines are rewritten canonically (`S1.E2 ∙ Title`), deduplicated and sorted. Writes a new `-clean.list` file by default, or replaces the original (keeping a `.bak`). |
-| **Download subtitles** | Bulk-download subtitles for every video that has none, from OpenSubtitles.com — searched by the file's unique hash first (exact release), then by title/season/episode. Each download is named exactly like its video (next to it, or into the `Subtitles` folder). Needs a free API key. |
+| **Download subtitles** | Bulk-download subtitles for every video that has none — searched by the file's unique hash first (exact release), then by title/season/episode, from OpenSubtitles.com with SubDL as automatic fallback. Each download is named exactly like its video (next to it, or into the `Subtitles` folder). Free API keys; see the quotas below. |
 | **Flatten** | Pull media files out of nested folders into one folder, renaming on collisions and cleaning up emptied folders. |
 | **Merge subtitles** | Stack two or more SRT tracks into one (e.g. two languages, or SDH + dialogue). Overlaps are swept and coalesced. |
 | **VTT → SRT** | Batch-convert WebVTT subtitles to SubRip, stripping cue settings and `<c>` tags while keeping `<i>/<b>/<u>`. |
@@ -163,11 +163,29 @@ movietool relocate-subs -d ~/Shows/Outer\ Banks -r --apply # also scan sub-folde
 movietool clean-titles -d ~/Shows/Outer\ Banks             # preview (default: -clean.list)
 movietool clean-titles -d ~/Shows/Outer\ Banks --replace --apply
 
-# 8. Bulk-download subtitles for videos that have none (free API key from
-#    opensubtitles.com -> user settings -> API Keys):
+# 8. Bulk-download subtitles for videos that have none:
 movietool download-subs -d ~/Shows/Outer\ Banks            # offline preview
-OPENSUBTITLES_API_KEY=... movietool download-subs -d ~/Shows/Outer\ Banks -r --apply
+movietool download-subs -d ~/Shows/Outer\ Banks -r --apply \
+    --api-key <opensubtitles-key> \
+    --os-user <your-username> --os-pass <your-password> \
+    --subdl-key <subdl-key>
+#    (each of these can also come from the environment: OPENSUBTITLES_API_KEY,
+#     OPENSUBTITLES_USER, OPENSUBTITLES_PASSWORD, SUBDL_API_KEY)
 ```
+
+### Downloading subtitles online: keys and quotas
+
+Both providers are free; the keys take about five minutes to get.
+
+| Provider | Get the key | Free quota per day | With payment |
+|---|---|---|---|
+| OpenSubtitles | opensubtitles.com -> sign up -> profile -> API Consumers | 5 downloads with the key alone; **20 with your account** (`--os-user`/`--os-pass`) | VIP ≈ $10/yr: 1000/day |
+| SubDL (fallback) | subdl.com -> sign up -> panel -> API | **50 downloads** + 2000 searches | Pro: 2000/day |
+
+MovieTool searches OpenSubtitles by the file's unique hash first (exact
+release match even for gibberish file names), then by title/season/episode,
+and only then - or when the quota is used up - falls back to SubDL, so the
+free daily total can be around 70 subtitles. The dry run stays offline.
 
 ## Safety model
 

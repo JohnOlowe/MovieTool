@@ -37,6 +37,24 @@ public final class Json {
         return value;
     }
 
+    /** Escapes a string for embedding in a JSON request body. */
+    public static String escape(String text) {
+        StringBuilder sb = new StringBuilder(text.length() + 8);
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c)); else sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
     /** Convenience: top-level object. */
     @SuppressWarnings("unchecked")
     public static Map<String, Object> parseObject(String text) {
