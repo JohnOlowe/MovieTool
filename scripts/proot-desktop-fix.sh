@@ -29,8 +29,19 @@
 #      probe passes while glycin's real --seccomp invocation still dies, and
 #      auto-removing a working shim crashed the desktop on the next boot).
 #   3. Widen the pacman mirror set (local file edit, no network) and install
-#      dbus - but only when dbus is actually missing, so a flaky mirror or
-#      mobile-data outage can never block the desktop fix.
+#      what is missing (dbus, xtrlock, xfce4-genmon-plugin) - but ONLY the
+#      missing ones, so a flaky mirror or mobile-data outage can never block
+#      the desktop fix when everything is already in place.
+#   4. DESKTOP INTEGRATION (makes proot XFCE behave like a real desktop):
+#      - battery widget for the panel (xfce4-genmon-plugin reading the
+#        launcher's feed) + a battery popup (Ctrl+Alt+B);
+#      - lock-screen via xtrlock (Ctrl+Alt+L) and a xflock4 shim;
+#      - logout / poweroff / reboot that act on the SESSION, never the
+#        phone ('reboot' restarts XFCE via a flag the launcher watches);
+#      - the (here useless, log-spamming) xfce4-power-manager autostart is
+#        hidden - the genmon widget replaces its battery display;
+#      - a session-start setup wires panel entry, shortcuts, file-manager
+#        bookmarks for /storage/android and desktop icons, idempotently.
 #
 # RUN AS ROOT INSIDE THE DISTRO - usually via the session launcher:
 #     AUTO_FIX_DESKTOP=1 ./scripts/termux-session.sh     (run once)
@@ -91,9 +102,17 @@ glycin_disabled_dir() {
 }
 
 dbus_launch_present() {
-    [ -n "$R" ] && return 0   # not checked in test mode
+    if [ -n "$R" ]; then [ -e "$R/usr/bin/dbus-launch" ]; return; fi
     command -v dbus-launch >/dev/null 2>&1
 }
+
+# --- optional desktop-integration pieces (installed when missing) ---------
+in_distro() {  # file exists inside the (possibly fake) distro
+    if [ -n "$R" ]; then [ -e "$R$1" ]; else [ -e "$1" ]; fi
+}
+xtrlock_present()  { in_distro /usr/bin/xtrlock; }
+genmon_present()   { in_distro /usr/lib/xfce4/panel/plugins/libgenmon.so; }
+power_manager_autostart_file() { printf '%s' "$R/etc/xdg/autostart/xfce4-power-manager.desktop"; }
 
 # The whole SVG pipeline is fine when glycin configs exist and the effective
 # bwrap works (native or shimmed).
@@ -212,18 +231,268 @@ fi
 # network, idempotent - so future package installs survive networks that
 # reject TLS to the geo mirror (pacman then has mirrors on other hosts).
 repair_arch_mirrors
-# dbus is usually already installed; then pacman is skipped ENTIRELY and a
-# broken mirror or dead connection can no longer mark the desktop fix
-# incomplete (seen in the field).
+# Only what is actually missing goes through pacman - when everything is
+# already installed pacman is skipped ENTIRELY and a broken mirror or dead
+# connection can no longer mark the desktop fix incomplete (field lesson).
+MISSING_ARCH=""
+MISSING_DEB=""
 if dbus_launch_present; then
-    log "dbus: already installed - skipping pacman (nothing to install)"
+    log "dbus: present"
 else
-    log "installing dbus (session bus; librsvg is no longer needed - 2.44+ has no classic loaders)"
-    install_packages "arch:dbus" "deb:dbus dbus-x11" || \
-        fail "package install failed; install 'dbus' manually"
+    log "dbus: missing - will install (session bus)"
+    MISSING_ARCH="$MISSING_ARCH dbus"
+    MISSING_DEB="$MISSING_DEB dbus dbus-x11"
+fi
+if xtrlock_present; then
+    log "xtrlock (lock screen): present"
+else
+    log "xtrlock: missing - will install (locks the session: Ctrl+Alt+L)"
+    MISSING_ARCH="$MISSING_ARCH xtrlock"
+    MISSING_DEB="$MISSING_DEB xtrlock"
+fi
+if genmon_present; then
+    log "xfce4-genmon-plugin (panel widgets): present"
+else
+    log "xfce4-genmon-plugin: missing - will install (battery widget on the panel)"
+    MISSING_ARCH="$MISSING_ARCH xfce4-genmon-plugin"
+    MISSING_DEB="$MISSING_DEB xfce4-genmon-plugin"
+fi
+if [ -z "${MISSING_ARCH// /}" ]; then
+    log "all desktop packages present - skipping pacman (nothing to install)"
+else
+    log "installing:${MISSING_ARCH}"
+    install_packages "arch:$MISSING_ARCH" "deb:$MISSING_DEB" || \
+        fail "package install failed; install manually:${MISSING_ARCH}"
 fi
 
-# ------------------------------------------------- 4. verify ----------------
+# ------------------------------------------------- 4. desktop integration --
+# Everything here is additive sugar: the desktop works without it, but with
+# it proot XFCE behaves like a real desktop (battery, lock, power shims).
+LOCAL_BIN="$R/usr/local/bin"
+mkdir -p "$LOCAL_BIN"
+
+# --- 4a. battery widget for the panel (xfce4-genmon-plugin) ----------------
+cat > "$LOCAL_BIN/movietool-battery-widget" <<'WIDGET'
+#!/bin/sh
+# MovieTool battery panel widget (xfce4-genmon-plugin). Reads the feed the
+# Termux-side launcher refreshes every 30 s: /tmp/.movietool-battery =
+# "PERCENT STATE UNIX_TIME" (Termux $PREFIX/tmp IS this distro's /tmp).
+FILE=/tmp/.movietool-battery
+[ -r "$FILE" ] || { printf 'battery: no feed'; exit 0; }
+read -r pct state ts < "$FILE" 2>/dev/null || { printf 'battery: no feed'; exit 0; }
+case "$state" in
+  Full|FULL|Charging|CHARGING) label="$state" ;;
+  *)                           label="discharging" ;;
+esac
+now=$(date +%s)
+if [ -n "$ts" ] && [ $((now - ts)) -gt 300 ]; then label="$label (stale)"; fi
+printf '%s%%\n<txt>%s%% (%s)</txt>\n<tool>Phone battery: %s%% - %s\nClick for a popup</tool>\n<click>movietool-battery-popup</click>\n' \
+    "$pct" "$pct" "$label" "$pct" "$label"
+WIDGET
+
+cat > "$LOCAL_BIN/movietool-battery-popup" <<'POPUP'
+#!/bin/sh
+# Pops the phone battery up as a desktop notification (also on Ctrl+Alt+B).
+FILE=/tmp/.movietool-battery
+if [ ! -r "$FILE" ]; then
+  text="No battery feed (the session launcher writes it every 30 s)."
+else
+  read -r pct state ts < "$FILE" 2>/dev/null || pct=""
+  if [ -z "$pct" ]; then
+    text="No battery data yet."
+  else
+    case "$state" in
+      Full|FULL)         text="$pct% - fully charged" ;;
+      Charging|CHARGING) text="$pct% - charging" ;;
+      *)                 text="$pct% - on battery" ;;
+    esac
+    now=$(date +%s)
+    [ -n "$ts" ] && [ $((now - ts)) -gt 300 ] && text="$text (stale feed)"
+  fi
+fi
+if command -v notify-send >/dev/null 2>&1; then
+  notify-send "Phone battery" "$text" -i battery 2>/dev/null || printf '%s\n' "$text"
+else
+  printf 'Phone battery: %s\n' "$text"
+fi
+POPUP
+
+# --- 4b. lock screen (xtrlock) + xflock4 shim ------------------------------
+cat > "$LOCAL_BIN/lock-screen" <<'LOCK'
+#!/bin/sh
+# Locks the SESSION (not the phone): xtrlock grabs pointer+keyboard until
+# the distro user's password is typed. Ctrl+Alt+L is wired to this.
+if command -v xtrlock >/dev/null 2>&1; then
+  exec xtrlock
+fi
+echo "lock-screen: xtrlock is not installed" >&2
+exit 1
+LOCK
+
+cat > "$LOCAL_BIN/xflock4" <<'XFLOCK'
+#!/bin/sh
+# Xfce's xflock4, reimplemented for proot: the usual lockers (xscreensaver,
+# xfce4-screensaver, ...) do not work here, xtrlock does.
+exec lock-screen
+XFLOCK
+
+# --- 4c. session power shims: logout / reboot / poweroff -------------------
+# These shadow /usr/bin's (which cannot work under proot anyway) and act on
+# the SESSION only - the phone is never touched.
+cat > "$LOCAL_BIN/logout-session" <<'LOGOUT'
+#!/bin/sh
+# Ends the XFCE session; the launcher on the Termux side then cleans up.
+exec xfce4-session-logout --fast --logout
+LOGOUT
+
+cat > "$LOCAL_BIN/reboot" <<'REBOOT'
+#!/bin/sh
+# Restarts the DESKTOP: touches the flag the session launcher watches, then
+# logs out. The launcher starts XFCE again ("reboot" = fresh desktop).
+touch /tmp/.movietool-reboot 2>/dev/null || true
+exec xfce4-session-logout --fast --logout
+REBOOT
+
+cat > "$LOCAL_BIN/poweroff" <<'POWEROFF'
+#!/bin/sh
+# "Power off" for the session: ends XFCE cleanly. The PHONE is not touched
+# (that is Android's job). The session launcher stops afterwards.
+exec xfce4-session-logout --fast --logout
+POWEROFF
+
+chmod 755 "$LOCAL_BIN/movietool-battery-widget" "$LOCAL_BIN/movietool-battery-popup" \
+          "$LOCAL_BIN/lock-screen" "$LOCAL_BIN/xflock4" \
+          "$LOCAL_BIN/logout-session" "$LOCAL_BIN/reboot" "$LOCAL_BIN/poweroff"
+
+# --- 4d. menu + desktop entries --------------------------------------------
+APPS="$R/usr/share/applications"
+mkdir -p "$APPS"
+write_desktop() {  # <id> <name> <exec> <icon>
+    cat > "$APPS/$1.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$2
+Comment=MovieTool session action (the phone is not affected)
+Exec=$3
+Icon=$4
+Terminal=false
+Categories=System;
+NoDisplay=false
+EOF
+}
+write_desktop movietool-lock     "Lock Screen (session)" "lock-screen"      "system-lock-screen"
+write_desktop movietool-logout   "Log Out (session)"     "logout-session"   "system-log-out"
+write_desktop movietool-reboot   "Reboot Session"        "reboot"           "view-refresh"
+write_desktop movietool-poweroff "Power Off Session"     "poweroff"         "system-shutdown"
+
+# --- 4e. hide xfce4-power-manager's autostart ------------------------------
+# Without a system bus/upower it only spams CRITICALs and fights other
+# instances ("Another power manager is already running"). The genmon widget
+# replaces its battery display. One-time backup, idempotent.
+PM_AUTO="$(power_manager_autostart_file)"
+if [ -f "$PM_AUTO" ] && ! grep -q "^Hidden=true" "$PM_AUTO"; then
+    [ -e "$PM_AUTO.movietool.bak" ] || cp "$PM_AUTO" "$PM_AUTO.movietool.bak" 2>/dev/null || true
+    printf '\n# hidden by MovieTool: no system bus under proot; the genmon battery widget replaces it\nHidden=true\n' >> "$PM_AUTO"
+    log "xfce4-power-manager autostart: hidden (it cannot work under proot; battery comes from the panel widget)"
+fi
+
+# --- 4f. session-start setup (runs as the session user via autostart) ------
+cat > "$LOCAL_BIN/movietool-desktop-setup" <<'SETUP'
+#!/bin/bash
+# Runs at every session start (autostart entry below) and wires the extras
+# into the user's live XFCE settings - idempotent, failures never fatal.
+LOG="$HOME/.movietool-setup.log"
+{
+echo "---- MovieTool desktop setup $(date) ----"
+
+# 1. battery widget on the first panel (genmon plugin)
+n=0
+while [ "$n" -lt 20 ]; do
+  xfconf-query -c xfce4-panel -p /panels >/dev/null 2>&1 && break
+  n=$((n + 1)); sleep 1
+done
+if xfconf-query -c xfce4-panel -p /panels >/dev/null 2>&1; then
+  PANEL="$(xfconf-query -c xfce4-panel -p /panels 2>/dev/null | head -n1)"
+  [ -n "$PANEL" ] || PANEL="panel-1"
+  PROPS="/panels/$PANEL/plugin-ids"
+  ids="$(xfconf-query -c xfce4-panel -p "$PROPS" 2>/dev/null || true)"
+  have=0; max=0
+  for id in $ids; do
+    case "$id" in (*[!0-9]*|"") continue ;; esac
+    [ "$id" -gt "$max" ] && max=$id
+    t="$(xfconf-query -c xfce4-panel -p "/plugins/plugin-$id/type" 2>/dev/null || true)"
+    [ "$t" = "genmon" ] && have=1
+  done
+  if [ "$have" = 0 ] && [ -e /usr/lib/xfce4/panel/plugins/libgenmon.so ]; then
+    nid=$((max + 1))
+    if xfconf-query -c xfce4-panel -p "/plugins/plugin-$nid/type" -n -t string -s genmon >/dev/null 2>&1; then
+      cmd=(xfconf-query -c xfce4-panel -p "$PROPS")
+      for id in $ids; do cmd+=(-t uint -s "$id"); done
+      cmd+=(-t uint -s "$nid")
+      if "${cmd[@]}" >/dev/null 2>&1; then
+        echo "battery widget: added to $PANEL as plugin-$nid"
+        xfce4-panel -r >/dev/null 2>&1 || true
+      else
+        echo "battery widget: could not update $PROPS"
+      fi
+    else
+      echo "battery widget: could not register plugin-$nid"
+    fi
+  else
+    echo "battery widget: already present (or plugin missing)"
+  fi
+else
+  echo "battery widget: xfce4-panel config not reachable"
+fi
+
+# 2. keyboard shortcuts: Ctrl+Alt+L lock, Ctrl+Alt+B battery popup
+xfconf-query -c xfce4-keyboard-shortcuts \
+  -p "/xfwm4/custom/<Primary><Alt>l" -n -t string -s "lock-screen" >/dev/null 2>&1 \
+  && echo "shortcut: Ctrl+Alt+L -> lock-screen" || echo "shortcut: Ctrl+Alt+L failed"
+xfconf-query -c xfce4-keyboard-shortcuts \
+  -p "/commands/custom/<Primary><Alt>b" -n -t string -s "movietool-battery-popup" >/dev/null 2>&1 \
+  && echo "shortcut: Ctrl+Alt+B -> battery popup" || echo "shortcut: Ctrl+Alt+B failed"
+
+# 3. file-manager bookmarks for the (hot-plug) phone storage
+BK="$HOME/.gtk-bookmarks"
+touch "$BK" 2>/dev/null || BK=""
+if [ -n "$BK" ]; then
+  add_bm() { grep -qxF "$1" "$BK" 2>/dev/null || printf '%s\n' "$1" >> "$BK"; }
+  add_bm "file:///storage/android Phone storage (all volumes)"
+  for v in /storage/android/*; do
+    [ -d "$v" ] || continue
+    case "$(basename "$v")" in emulated|self) continue ;; esac
+    add_bm "file://$v SD/USB: $(basename "$v")"
+  done
+  echo "bookmarks: updated"
+fi
+
+# 4. desktop icons for the session power actions
+mkdir -p "$HOME/Desktop" 2>/dev/null
+for f in movietool-lock movietool-logout movietool-reboot movietool-poweroff; do
+  [ -f "/usr/share/applications/$f.desktop" ] && \
+    cp -f "/usr/share/applications/$f.desktop" "$HOME/Desktop/" 2>/dev/null || true
+done
+echo "desktop icons: updated"
+echo "---- done ----"
+} >> "$LOG" 2>&1
+SETUP
+chmod 755 "$LOCAL_BIN/movietool-desktop-setup"
+
+cat > "$R/etc/xdg/autostart/movietool-desktop-setup.desktop" <<'AUTO'
+[Desktop Entry]
+Type=Application
+Name=MovieTool desktop setup
+Comment=Wires in the battery widget, shortcuts, bookmarks and session icons
+Exec=/usr/local/bin/movietool-desktop-setup
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+AUTO
+
+log "desktop integration: battery widget + lock (Ctrl+Alt+L) + session logout/reboot/poweroff installed"
+
+# ------------------------------------------------- 5. verify ----------------
 log "verification:"
 if glycin_conf_dir >/dev/null; then
     log "  glycin loader configs: present"
@@ -239,6 +508,16 @@ if dbus_launch_present; then
     log "  dbus-launch: present"
 else
     fail "  dbus-launch: MISSING"
+fi
+if [ -x "$R/usr/local/bin/lock-screen" ] && [ -x "$R/usr/local/bin/poweroff" ]; then
+    log "  session power shims (lock/logout/reboot/poweroff): present"
+else
+    fail "  session power shims: MISSING"
+fi
+if [ -e "$R/etc/xdg/autostart/movietool-desktop-setup.desktop" ]; then
+    log "  session-start integration (panel widget, shortcuts, bookmarks): armed"
+else
+    fail "  session-start integration: MISSING"
 fi
 if svg_path_ok && dbus_launch_present; then
     log "desktop fix: OK - start the session normally"

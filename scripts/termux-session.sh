@@ -31,6 +31,23 @@
 #   7. Bind sources that do not exist (e.g. an unmounted SD card) are
 #      skipped with a warning instead of proot erroring on them.
 #
+#   8. STORAGE HOT-PLUG: the whole /storage tree is bound to
+#      /storage/android inside the session. proot translates paths per
+#      syscall, so SD cards / USB drives inserted LATER show up live
+#      under /storage/android/<UUID> - no session restart. The two
+#      specific binds below stay as convenient aliases when present.
+#
+#   9. BATTERY: a small feed on the Termux side samples the phone
+#      battery every 30 s (termux-battery-status from Termux:API, or
+#      /sys/class/power_supply as fallback) into
+#      $PREFIX/tmp/.movietool-battery; the xfce4-genmon-plugin widget
+#      installed by proot-desktop-fix.sh shows it on the panel.
+#
+#  10. SESSION POWER: 'reboot' inside the desktop restarts XFCE (the
+#      launcher loops until the desktop exits WITHOUT the reboot flag),
+#      'poweroff'/'logout' end the session - the phone itself is never
+#      touched. The wake lock is released when the session ends.
+#
 # PortAudio apps (Audacity, ...) seeing NO devices / "Error recording 0":
 #   run once:  AUTO_FIX_BRIDGE=1 ./scripts/termux-session.sh
 # XFCE aborting with 'Gtk:ERROR ... image-missing.svg ... Bail out!':
@@ -71,8 +88,74 @@ fix_requested() {
     [ "${AUTO_FIX:-0}" = "1" ] || [ "${!1:-0}" = "1" ]
 }
 
+# ------------------------------------------------------------ battery feed --
+# Sampled on the Termux side (only it can reach termux-battery-status and
+# Android's power supply nodes) and written where the distro can read it:
+# Termux $PREFIX/tmp IS the distro /tmp (--shared-tmp).
+BATTERY_FILE="${TMPDIR:-$PREFIX/tmp}/.movietool-battery"
+BATTERY_SYSFS="${BATTERY_SYSFS:-/sys/class/power_supply/battery}"
+
+# Removable volumes currently mounted (UUID-style names like 67FE-19FE).
+list_volumes() {
+  for d in /storage/*; do
+    [ -d "$d" ] || continue
+    case "$(basename "$d")" in
+      emulated|self|enc_emulated) ;;
+      *) basename "$d" ;;
+    esac
+  done 2>/dev/null
+}
+
+# Prints "PERCENT STATE" (state may be empty); prints nothing without a source.
+battery_sample() {
+  local pct="" state="" json
+  if command -v termux-battery-status >/dev/null 2>&1; then
+    json="$(termux-battery-status 2>/dev/null || true)"
+    pct="$(printf '%s' "$json" | tr ',' '\n' \
+           | sed -n 's/.*"percentage"[[:space:]]*:[[:space:]]*"\{0,1\}\([0-9]\{1,3\}\)"\{0,1\}.*/\1/p' | head -n1)"
+    state="$(printf '%s' "$json" | tr ',' '\n' \
+             | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p' | head -n1)"
+  fi
+  if [ -z "$pct" ] && [ -r "$BATTERY_SYSFS/capacity" ]; then
+    pct="$(cat "$BATTERY_SYSFS/capacity" 2>/dev/null || true)"
+    state="$(cat "$BATTERY_SYSFS/status" 2>/dev/null || true)"
+  fi
+  [ -n "$pct" ] && printf '%s %s\n' "$pct" "${state:-UNKNOWN}"
+}
+
+battery_feed() {
+  while :; do
+    local sample
+    sample="$(battery_sample 2>/dev/null || true)"
+    if [ -n "$sample" ]; then
+      printf '%s %s\n' "$sample" "$(date +%s)" \
+        > "$BATTERY_FILE.tmp" 2>/dev/null \
+        && mv -f "$BATTERY_FILE.tmp" "$BATTERY_FILE" 2>/dev/null || true
+    fi
+    sleep 30
+  done
+}
+
+# MOVIETOOL_SESSION_TEST=1 exercises the helpers and exits (no PA, no proot).
+if [ "${MOVIETOOL_SESSION_TEST:-0}" = "1" ]; then
+  sample="$(battery_sample || true)"
+  echo "battery-sample: ${sample:-none}"
+  echo "battery-file: $BATTERY_FILE"
+  echo "volumes: $(list_volumes | tr '\n' ' ')"
+  exit 0
+fi
+
 # Keep the device awake so PulseAudio is not frozen while backgrounded.
 termux-wake-lock 2>/dev/null || true
+
+# Battery feed for the desktop widget (Termux:API or sysfs, see above).
+battery_feed &
+BATTERY_FEED_PID=$!
+cleanup() {
+  kill "$BATTERY_FEED_PID" 2>/dev/null || true
+  termux-wake-unlock 2>/dev/null || true
+}
+trap cleanup EXIT
 
 # ---- 1. PulseAudio on the Android/Termux side ------------------------------
 pulseaudio --kill 2>/dev/null || true
@@ -116,9 +199,17 @@ for bind in "${BINDS[@]}"; do
   if [ -e "$src" ]; then
     BIND_ARGS+=(--bind "$src:$dst")
   else
-    echo "[bind] WARNING: $src does not exist right now - skipping (remount the storage and restart to include it)"
+    echo "[bind] NOTE: $src not mounted right now - it will still appear live under /storage/android/<UUID> when inserted (no restart needed)"
   fi
 done
+# Storage hot-plug: bind the WHOLE /storage tree; per-syscall path
+# translation makes volumes inserted later visible immediately.
+if [ -d /storage ]; then
+  BIND_ARGS+=(--bind "/storage:/storage/android")
+  echo "[bind] storage: /storage -> /storage/android (live; volumes now: $(list_volumes | tr '\n' ' '))"
+else
+  echo "[bind] WARNING: /storage does not exist - run 'termux-setup-storage' once"
+fi
 if [ -d "$SCRIPT_DIR" ]; then
   BIND_ARGS+=(--bind "$SCRIPT_DIR:/mnt/movietool-scripts")
 fi
@@ -202,8 +293,22 @@ rm -rf "${TMPDIR:-$PREFIX/tmp}/xdg-${PROOT_USER}" 2>/dev/null || true
 
 INNER="su - ${PROOT_USER} -c \"XDG_RUNTIME_DIR=${RUNTIME_DIR_IN_DISTRO} PULSE_SERVER=127.0.0.1 DISPLAY=${DISPLAY_NO} sh -c 'mkdir -p ${RUNTIME_DIR_IN_DISTRO} && chmod 700 ${RUNTIME_DIR_IN_DISTRO} && export XDG_RUNTIME_DIR PULSE_SERVER DISPLAY && exec dbus-launch --exit-with-session sh -c \\\"onboard >/dev/null 2>&1 & exec startxfce4\\\"'\""
 
-proot-distro login "${BIND_ARGS[@]}" "$PROOT_DISTRO" --shared-tmp -- /bin/bash -c "$INNER"
+# 'reboot' inside the desktop touches $PREFIX/tmp/.movietool-reboot (= the
+# distro /tmp) and logs out; the launcher then starts the desktop again.
+# A plain logout/poweroff leaves no flag and ends the launcher.
+REBOOT_FLAG="${TMPDIR:-$PREFIX/tmp}/.movietool-reboot"
+rm -f "$REBOOT_FLAG" 2>/dev/null || true
+while :; do
+  proot-distro login "${BIND_ARGS[@]}" "$PROOT_DISTRO" --shared-tmp -- /bin/bash -c "$INNER"
+  if [ -f "$REBOOT_FLAG" ]; then
+    rm -f "$REBOOT_FLAG" 2>/dev/null || true
+    echo "[session] reboot requested - restarting the desktop ..."
+    sleep 1
+  else
+    break
+  fi
+done
 
-# The desktop was closed: release the wake lock again.
-termux-wake-unlock 2>/dev/null || true
+# The desktop was closed: the EXIT trap releases the wake lock and stops
+# the battery feed.
 exit 0

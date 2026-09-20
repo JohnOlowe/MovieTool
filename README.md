@@ -260,6 +260,41 @@ scripts live in `scripts/`:
   it checks the whole path layer by layer (server, sinks, ALSA bridge, a
   3 second microphone round trip) and plays the recording back.
 
+### Storage hot-plug: no more restarting for a new SD card / USB drive
+
+The launcher binds the WHOLE Android `/storage` tree to
+`/storage/android` inside the session, and proot resolves paths per
+syscall - so volumes inserted later appear live under
+`/storage/android/<UUID>` (Thunar: F5 to refresh). The two classic binds
+(`/storage/67FE-19FE -> /storage/sdcard`, `/storage/EBC3-7839 ->
+/storage/sdcard1`) still work as friendly aliases whenever those cards
+are mounted; if one is missing at start it now just notes that it will
+appear under `/storage/android/...` the moment it is plugged in.
+
+### Desktop integration: battery, lock, session power
+
+`proot-desktop-fix.sh` (the same one-time `AUTO_FIX_DESKTOP=1` run) also
+installs a small "make it a real desktop" layer:
+
+| What | How |
+|---|---|
+| Battery percentage on the panel | an `xfce4-genmon-plugin` widget fed every 30 s by the launcher (`termux-battery-status` from the Termux:API app if installed, `/sys/class/power_supply` otherwise). Click it (or `Ctrl+Alt+B`) for a popup. |
+| Lock screen | `lock-screen` / `xflock4` via `xtrlock` - locks the SESSION, `Ctrl+Alt+L` by default. Type the distro user's password to unlock. |
+| Log Out / Power Off | `logout-session` / `poweroff` end the XFCE session cleanly (the phone itself is NEVER switched off); the launcher then releases the wake lock and stops the battery feed. |
+| Reboot | `reboot` restarts only the desktop: the launcher relaunches XFCE automatically. |
+| Desktop icons & menu | Lock/Logout/Reboot/Power-Off entries appear in the applications menu and on the desktop. |
+| File manager bookmarks | Thunar sidebar gets "Phone storage (all volumes)" plus one bookmark per mounted volume. |
+
+The (under proot useless, log-spamming) `xfce4-power-manager` autostart is
+hidden - one backup is kept, and the CRITICAL/system-bus spam in the
+session log disappears with it. Everything is wired by a session-start
+script (`/usr/local/bin/movietool-desktop-setup`) that logs to
+`~/.movietool-setup.log` and is safe to re-run.
+
+For the best battery data install the Termux:API app (from F-Droid) and
+`pkg install termux-api` in Termux; without it the launcher falls back to
+Android's sysfs battery nodes.
+
 ### XFCE aborts with "Gtk:ERROR ... image-missing.svg ... Bail out!"
 
 gdk-pixbuf 2.44+ / GTK load ALL images through the sandboxed glycin loaders,
