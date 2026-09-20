@@ -385,15 +385,39 @@ write_desktop movietool-logout   "Log Out (session)"     "logout-session"   "sys
 write_desktop movietool-reboot   "Reboot Session"        "reboot"           "view-refresh"
 write_desktop movietool-poweroff "Power Off Session"     "poweroff"         "system-shutdown"
 
-# --- 4e. hide xfce4-power-manager's autostart ------------------------------
-# Without a system bus/upower it only spams CRITICALs and fights other
-# instances ("Another power manager is already running"). The genmon widget
-# replaces its battery display. One-time backup, idempotent.
+# --- 4e. hide xfce4-power-manager COMPLETELY -------------------------------
+# Without a system bus/upower it only spams CRITICALs. Hiding the XDG
+# autostart alone proved NOT enough in the field: something activates it
+# through D-Bus (org.xfce.PowerManager), so the D-Bus activation service
+# must go too. The genmon widget replaces its battery display. Both changes
+# are revertible (backups kept), idempotent.
 PM_AUTO="$(power_manager_autostart_file)"
 if [ -f "$PM_AUTO" ] && ! grep -q "^Hidden=true" "$PM_AUTO"; then
     [ -e "$PM_AUTO.movietool.bak" ] || cp "$PM_AUTO" "$PM_AUTO.movietool.bak" 2>/dev/null || true
     printf '\n# hidden by MovieTool: no system bus under proot; the genmon battery widget replaces it\nHidden=true\n' >> "$PM_AUTO"
     log "xfce4-power-manager autostart: hidden (it cannot work under proot; battery comes from the panel widget)"
+fi
+for service in "$R"/usr/share/dbus-1/services/org.xfce.PowerManager*.service; do
+    [ -f "$service" ] || continue
+    case "$service" in *.movietool-disabled) continue ;; esac
+    mv "$service" "$service.movietool-disabled"
+    log "power-manager D-Bus activation disabled: $(basename "$service") -> .movietool-disabled (this is what kept starting it)"
+done
+POLKIT_AUTO="$R/etc/xdg/autostart/polkit-gnome-authentication-agent-1.desktop"
+if [ -f "$POLKIT_AUTO" ] && ! grep -q "^Hidden=true" "$POLKIT_AUTO"; then
+    [ -e "$POLKIT_AUTO.movietool.bak" ] || cp "$POLKIT_AUTO" "$POLKIT_AUTO.movietool.bak" 2>/dev/null || true
+    printf '\n# hidden by MovieTool: no system bus under proot, the agent cannot work\nHidden=true\n' >> "$POLKIT_AUTO"
+    log "polkit-gnome autostart: hidden (no system bus to authenticate against)"
+fi
+# xfce4-session probes /usr/bin/pm-is-supported three times per boot and
+# warns 'Failed to execute child process' each time - answer the truth.
+if [ -n "$R" ]; then PM_IS_SUPPORTED="$R/usr/bin/pm-is-supported"; else PM_IS_SUPPORTED="/usr/bin/pm-is-supported"; fi
+if [ ! -e "$PM_IS_SUPPORTED" ]; then
+    printf '#!/bin/sh\n# MovieTool stub: suspend/hibernate do not exist inside proot.\nexit 1\n' > "$PM_IS_SUPPORTED" 2>/dev/null || true
+    if [ -e "$PM_IS_SUPPORTED" ]; then
+        chmod 755 "$PM_IS_SUPPORTED"
+        log "pm-is-supported stub installed (silences three xfce4-session warnings per boot)"
+    fi
 fi
 
 # --- 4f. session-start setup (runs as the session user via autostart) ------

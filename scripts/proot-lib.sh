@@ -138,15 +138,29 @@ install_packages() {
 #      signatures either way, so one broken mirror cannot abort a sync.
 # Handles BOTH layouts: inline "Server =" lines inside pacman.conf AND the
 # "Include = /etc/pacman.d/mirrorlist" layout (ALARM images use either/both).
+# Order is field-learned: on the user's network a TLS-intercepting appliance
+# breaks EVERY *.archlinuxarm.org hostname ('certificate subject name
+# ha.haproxy does not match ...'), while mirrors.tuna.tsinghua.edu.cn (a
+# different domain) synced the databases and served 222 MiB of packages
+# without a single error. So the independent host goes FIRST, its plain-HTTP
+# twin second (immune to TLS interception; signatures keep packages
+# verified), the geo mirror's HTTP entry next, and the intercepted
+# archlinuxarm.org TLS hosts last as fallbacks for other networks.
 ALARM_MIRROR_SET=(
+    'https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo'  # independent host (works here)
+    'http://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo'   # same, plain http
+    'http://mirror.archlinuxarm.org/$arch/$repo'                     # geo, plain http
     'https://fr.mirror.archlinuxarm.org/$arch/$repo'                 # Paris
     'https://de.mirror.archlinuxarm.org/$arch/$repo'                 # Berlin
     'https://dk.mirror.archlinuxarm.org/$arch/$repo'                 # Aalborg (dotsrc)
     'https://nj.us.mirror.archlinuxarm.org/$arch/$repo'              # New Jersey
-    'https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo'  # independent host
-    'https://mirror.archlinuxarm.org/$arch/$repo'                    # geo (broken TLS here)
-    'http://mirror.archlinuxarm.org/$arch/$repo'                     # geo over http, last resort
+    'https://mirror.archlinuxarm.org/$arch/$repo'                    # geo https (broken TLS here)
 )
+
+# First active server's hostname, lowercase (empty when none).
+_mirror_first_host() {
+    _mirror_urls "$1" | head -n1 | awk -F/ '{print tolower($3)}'
+}
 
 _mirror_urls() {  # <file>: URLs of the active "Server =" lines
     grep -E '^[[:space:]]*Server[[:space:]]*=' "$1" 2>/dev/null |
@@ -211,7 +225,7 @@ _mirror_append_missing() {
 
 # One mirrorlist file: replace mainline sets, widen single-host ALARM sets.
 _repair_mirror_file() {
-    local f="$1" nalarm
+    local f="$1" nalarm first
     if _mirror_urls "$f" | _mirror_has_mainline; then
         _mirror_backup "$f"
         _mirror_replace_servers "$f"
@@ -221,10 +235,22 @@ _repair_mirror_file() {
     nalarm="$(_mirror_urls "$f" | _mirror_alarm_hosts | awk 'END { print NR }')"
     if [ "${nalarm:-0}" -lt 2 ]; then
         _mirror_backup "$f"
-        _mirror_append_missing "$f"
+        _mirror_replace_servers "$f"
         log "mirrorlist widened: $f - ALARM mirrors on several independent hosts (TLS to the geo mirror was rejected)"
         return 0
     fi
+    # Field upgrade: a set that still STARTS with an archlinuxarm.org host was
+    # written by an older revision. Those hosts are exactly the ones a
+    # TLS-intercepting network breaks, so rewrite in the field-proven order.
+    first="$(_mirror_first_host "$f")"
+    case "$first" in
+        *.archlinuxarm.org)
+            _mirror_backup "$f"
+            _mirror_replace_servers "$f"
+            log "mirrorlist reordered: $f - independent mirrors first (the TLS interceptor breaks every *.archlinuxarm.org host)"
+            return 0
+            ;;
+    esac
     return 1
 }
 
@@ -232,7 +258,7 @@ _repair_mirror_file() {
 # left alone when its total pool (inline + include'd lists) already has >= 2
 # distinct ALARM hosts and no mainline servers.
 _repair_conf_inline() {
-    local conf="$1" sec inc incf pool nalarm pipe changed=0
+    local conf="$1" sec inc incf pool nalarm first pipe changed=0
     pipe="$(_mirror_pipe)"
     while IFS= read -r sec; do
         [ -n "$sec" ] || continue
@@ -256,7 +282,13 @@ _repair_conf_inline() {
         done < <(grep -i "^[[:space:]]*Include *=" "$conf")
         nalarm="$(printf '%s\n' "$pool" | _mirror_alarm_hosts | awk 'END { print NR }')"
         if [ "${nalarm:-0}" -ge 2 ] && ! printf '%s\n' "$pool" | _mirror_has_mainline; then
-            continue
+            # Field upgrade: an inline set still STARTING with an
+            # archlinuxarm.org host gets the field-proven order instead.
+            first="$(printf '%s\n' "$pool" | head -n1 | awk -F/ '{print tolower($3)}')"
+            case "$first" in
+                *.archlinuxarm.org) ;;
+                *) continue ;;
+            esac
         fi
         _mirror_backup "$conf"
         awk -F'[][]' -v s="$sec" -v ms="$pipe" '
@@ -268,7 +300,7 @@ _repair_conf_inline() {
             { print }
         ' "$conf" > "$conf.tmp" && mv "$conf.tmp" "$conf"
         changed=1
-        log "pacman.conf [$sec]: inline Server lines replaced with a multi-mirror ALARM set (backup: pacman.conf.movietool.bak)"
+        log "pacman.conf [$sec]: inline Server lines set to the field-proven multi-mirror order (backup: pacman.conf.movietool.bak)"
     done < <(awk -F'[][]' '
         /^[[:space:]]*\[/ { cur = $2 }
         /^[[:space:]]*Server[[:space:]]*=/ { print cur }
