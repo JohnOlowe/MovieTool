@@ -731,20 +731,46 @@ final class Cards {
 
     static final class ShiftCard extends OpCard {
         private final Form form = new Form();
-        private final JTextField file = form.addPathField("Subtitles:", false,
-                "one .srt file - or a folder to shift every .srt in it");
+        private final javax.swing.JTextArea files = new javax.swing.JTextArea();
         private final JSpinner seconds = new JSpinner(new SpinnerNumberModel(Double.valueOf(0), Double.valueOf(-600),
                 Double.valueOf(600), Double.valueOf(0.5)));
-        private final JCheckBox recursive = form.addCheckbox("Include sub-folders (in folder mode)", false);
+        private final JCheckBox recursive;
         private final JCheckBox backup;
+        private final SubsShift shifter = new SubsShift();
 
         ShiftCard() {
-            super("Shift timing", "Delay or advance one subtitle - or every .srt in a folder at once - by a constant amount (positive = later). A .bak copy of each original is kept.");
-            form.addRow("Shift by (seconds):", seconds, new JLabel("negative = earlier, positive = later"));
+            super("Shift timing", "Delay or advance subtitles by a constant amount (positive = later). Hand-pick any number of files/folders - one per line - all shifted in ONE run; give any line its own time with 'path | 3.5'. A one-time .bak of each original is kept.");
+            files.setRows(7);
+            files.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12));
+            javax.swing.JScrollPane listScroll = new javax.swing.JScrollPane(files);
+            listScroll.setPreferredSize(new java.awt.Dimension(520, 130));
+            JButton addFiles = new JButton("Add files...");
+            addFiles.addActionListener(new java.awt.event.ActionListener() {
+                @Override
+                public void actionPerformed(java.awt.event.ActionEvent event) {
+                    javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
+                    chooser.setMultiSelectionEnabled(true);
+                    chooser.setFileSelectionMode(javax.swing.JFileChooser.FILES_AND_DIRECTORIES);
+                    if (chooser.showOpenDialog(form.panel()) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                        StringBuilder extra = new StringBuilder();
+                        for (java.io.File selected : chooser.getSelectedFiles()) {
+                            if (extra.length() > 0 || files.getText().trim().length() > 0) extra.append('\n');
+                            extra.append(selected.getAbsolutePath());
+                        }
+                        String existing = files.getText();
+                        if (existing.trim().length() > 0 && existing.charAt(existing.length() - 1) != '\n') {
+                            existing = existing + "\n";
+                        }
+                        files.setText(existing + extra.toString());
+                    }
+                }
+            });
+            form.addRow("Files / folders:", addFiles, new JLabel("one per line; a folder line shifts every .srt inside it"));
+            form.addRow("Hand-picked list:", listScroll, new JLabel("path | 3.5 = this file gets its own shift time"));
+            form.addRow("Shift by (seconds):", seconds, new JLabel("used for lines without their own | time"));
+            recursive = form.addCheckbox("Include sub-folders (for folder lines)", false);
             backup = form.addCheckbox("Keep a .bak copy of each file", true);
         }
-
-        private final SubsShift shifter = new SubsShift();
 
         @Override
         public JComponent component() {
@@ -753,8 +779,36 @@ final class Cards {
 
         @Override
         public void collect(Options options) {
-            options.setFolder(file.getText().trim());
-            options.setShiftSeconds(((Number) seconds.getValue()).doubleValue());
+            double commonSeconds = ((Number) seconds.getValue()).doubleValue();
+            Options.ShiftGroup common = null;
+            java.util.LinkedHashMap<Double, Options.ShiftGroup> own = new java.util.LinkedHashMap<Double, Options.ShiftGroup>();
+            for (String rawLine : files.getText().split("\n")) {
+                String line = rawLine.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                String path = line;
+                Double ownSeconds = null;
+                int bar = line.lastIndexOf('|');
+                if (bar > 0) {
+                    try {
+                        ownSeconds = Double.valueOf(line.substring(bar + 1).trim());
+                        path = line.substring(0, bar).trim();
+                    } catch (NumberFormatException notANumber) {
+                        path = line; // the | belonged to the path after all
+                    }
+                }
+                Options.ShiftGroup group;
+                if (ownSeconds == null) {
+                    if (common == null) common = options.addShiftGroup(commonSeconds);
+                    group = common;
+                } else {
+                    group = own.get(ownSeconds);
+                    if (group == null) {
+                        group = options.addShiftGroup(ownSeconds.doubleValue());
+                        own.put(ownSeconds, group);
+                    }
+                }
+                group.paths.add(path);
+            }
             options.setRecursive(recursive.isSelected());
             options.setBackup(backup.isSelected());
         }

@@ -37,7 +37,7 @@ recompiling just to point the tool at a different folder.
 | **Flatten** | Pull media files out of nested folders into one folder, renaming on collisions and cleaning up emptied folders. |
 | **Merge subtitles** | Stack two or more SRT tracks into one (e.g. two languages, or SDH + dialogue). Overlaps are swept and coalesced. |
 | **VTT → SRT** | Batch-convert WebVTT subtitles to SubRip, stripping cue settings and `<c>` tags while keeping `<i>/<b>/<u>`. |
-| **Shift timing** | Move every cue earlier or later by a constant amount, with a `.bak` backup. |
+| **Shift timing** | Move every cue earlier or later by a constant amount - one file, a folder, or any hand-picked list with a shared and/or per-file offset in one run; one-time `.bak` backups. |
 | **Episodes** | List every recognised episode grouped per show and season (text or CSV). |
 | **Library check** | Health report: conventions in use, unrecognised names, duplicate episodes, episodes missing subtitles. |
 
@@ -123,7 +123,7 @@ movietool download-subs -d <folder> [-r] [--lang en] [--api-key k] [--into-subs-
 movietool flatten -d <folder> [-o <target>] [--apply]
 movietool merge-subs <first.srt> <second.srt> [more...] [-o out.srt] [--top]
 movietool convert-vtt <file-or-folder> [-o out] [-r] [--overwrite]
-movietool shift-subs <file.srt> --seconds 2.5 [-o out] [--no-backup]
+movietool shift-subs (--seconds n <files|folders>...) [--seconds n2 <files>...] [-r] [-o out] [--no-backup]
 movietool list-episodes -d <folder> [-r] [--csv] [-o out.csv]
 movietool check -d <folder> [-r] [-c ids]
 movietool conventions          # list convention ids and examples

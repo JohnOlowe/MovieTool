@@ -16,51 +16,72 @@ import java.util.Locale;
  * Shifts subtitle timing by a constant offset. Replaces the timing nudge that
  * used to require editing hard-coded paths and recompiling.
  *
- * <p>One subtitle file OR a whole folder: give a directory and every
- * {@code .srt} inside it (optionally recursive) is delayed/advanced by the
- * same amount - a {@code .bak} copy of each original is kept next to it.</p>
+ * <p>Accepts ONE subtitle file, a folder (every {@code .srt} inside, optionally
+ * recursive), or any number of "shift passes": each pass is one offset plus the
+ * files/folders it applies to. All passes execute in a single run, so some
+ * subtitles can move together (same offset) while others get their own
+ * independent offsets. Every shifted file keeps a one-time {@code .bak} of its
+ * original - never overwritten by an already-shifted file.</p>
  */
 public class SubsShift {
 
-    /** Shifts the subtitle file (or every .srt in the folder) named by options.folder. */
+    /** Shifts the file(s)/folder(s)/passes held by the options. */
     public OperationResult shift(Options options) {
         OperationResult result = new OperationResult();
-        File input = new File(options.getFolder());
-        long millis = Math.round(options.getShiftSeconds() * 1000.0);
-        if (millis == 0) {
-            result.add(Problem.error("Shift amount is zero; pass --seconds like 2.5 or -3"));
-            return result;
+        List<Options.ShiftGroup> groups = options.getShiftGroups();
+        if (groups.isEmpty()) {
+            String folder = options.getFolder() == null ? "" : options.getFolder().trim();
+            if (folder.isEmpty()) {
+                result.add(Problem.error("No subtitle file, folder or file list given"));
+                return result;
+            }
+            Options.ShiftGroup legacy = options.addShiftGroup(options.getShiftSeconds());
+            legacy.paths.add(folder);
+            groups = options.getShiftGroups();
         }
-        if (input.isDirectory()) {
-            return shiftFolder(input, options, millis);
-        }
-        if (!input.isFile()) {
-            result.add(Problem.error("Not a subtitle file: " + options.getFolder()));
-            return result;
-        }
-        File output = options.getOutput().trim().isEmpty() ? input : new File(options.getOutput().trim());
-        shiftOne(input, output, options, millis, result);
-        return result;
-    }
 
-    /** Folder mode: shift every .srt in the folder (and sub-folders when recursive). */
-    private OperationResult shiftFolder(File folder, Options options, long millis) {
-        OperationResult result = new OperationResult();
-        List<File> files = new ArrayList<File>();
-        collectSubtitles(folder, options.isRecursive(), files);
-        if (files.isEmpty()) {
-            result.add(Problem.warn("No .srt files found in " + folder.getPath()
-                    + (options.isRecursive() ? "" : " (enable 'include sub-folders' to search deeper)")));
-            return result;
-        }
         int done = 0;
         int failed = 0;
-        for (File file : files) {
-            if (shiftOne(file, file, options, millis, result)) done++; else failed++;
+        int[] donePerGroup = new int[groups.size()];
+        for (int g = 0; g < groups.size(); g++) {
+            Options.ShiftGroup group = groups.get(g);
+            if (group.paths.isEmpty()) {
+                result.add(Problem.warn("A shift pass has no files - skipped"));
+                continue;
+            }
+            long millis = Math.round(group.seconds * 1000.0);
+            if (millis == 0) {
+                result.add(Problem.error("Shift amount is zero for " + group.paths.size()
+                        + " file(s); pass --seconds like 2.5 or -3"));
+                continue;
+            }
+            boolean single = groups.size() == 1 && group.paths.size() == 1;
+            for (String path : group.paths) {
+                File input = new File(path);
+                if (input.isDirectory()) {
+                    List<File> found = new ArrayList<File>();
+                    collectSubtitles(input, options.isRecursive(), found);
+                    if (found.isEmpty()) {
+                        result.add(Problem.warn("No .srt files found in " + path
+                                + (options.isRecursive() ? "" : " (enable sub-folders to search deeper)")));
+                        continue;
+                    }
+                    for (File file : found) {
+                        if (shiftOne(file, file, options, millis, result)) { done++; donePerGroup[g]++; }
+                        else failed++;
+                    }
+                } else if (input.isFile()) {
+                    File output = single && !options.getOutput().trim().isEmpty()
+                            ? new File(options.getOutput().trim()) : input;
+                    if (shiftOne(input, output, options, millis, result)) { done++; donePerGroup[g]++; }
+                    else failed++;
+                } else {
+                    result.add(Problem.error("Not a subtitle file or folder: " + path));
+                    failed++;
+                }
+            }
         }
-        String direction = millis > 0 ? "later" : "earlier";
-        result.setReport(done + " subtitle file(s) shifted " + (millis / 1000.0) + "s " + direction
-                + (failed > 0 ? ", " + failed + " failed" : "") + " - " + folder.getPath());
+        result.setReport(buildSummary(done, failed, groups, donePerGroup));
         return result;
     }
 
@@ -90,6 +111,24 @@ public class SubsShift {
             result.add(Problem.error("Failed: " + input.getName() + ": " + e.getMessage()));
             return false;
         }
+    }
+
+    private static String buildSummary(int done, int failed, List<Options.ShiftGroup> groups, int[] donePerGroup) {
+        if (done == 0 && failed == 0) return "Nothing shifted";
+        StringBuilder sb = new StringBuilder(done + " subtitle file(s) shifted");
+        if (failed > 0) sb.append(", ").append(failed).append(" failed");
+        if (groups.size() > 1) {
+            sb.append(" in ").append(groups.size()).append(" pass(es):");
+            for (int g = 0; g < groups.size(); g++) {
+                double seconds = groups.get(g).seconds;
+                sb.append(' ').append(donePerGroup[g]).append(" at ")
+                        .append(seconds >= 0 ? "+" : "").append(seconds).append("s;");
+            }
+        } else if (!groups.isEmpty()) {
+            double seconds = groups.get(0).seconds;
+            sb.append(' ').append(seconds >= 0 ? "+" : "").append(seconds).append("s");
+        }
+        return sb.toString();
     }
 
     private static void collectSubtitles(File dir, boolean recursive, List<File> out) {

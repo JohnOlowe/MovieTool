@@ -162,10 +162,15 @@ final class HelpBook {
     private static void shift(StringBuilder sb) {
         sb.append("<h4>Shift timing</h4><p>Delays or advances subtitles by a constant amount when "
                 + "they are consistently out of sync (positive seconds = later, negative = earlier). "
-                + "Give ONE .srt file, or a FOLDER to shift every .srt inside it at once - tick "
-                + "'Include sub-folders' to cover those too. A .bak copy of each original is kept "
-                + "(untick to skip that). Use the Collect/Download functions first if your subtitles "
-                + "still live elsewhere.</p>");
+                + "Hand-pick ANY number of files and folders in the list - one per line (the "
+                + "'Add files...' button lets you ctrl-click several at once) - and they are all "
+                + "shifted in ONE run. Lines without their own time use the 'Shift by (seconds)' "
+                + "spinner, so those move together; give any line its own independent time by "
+                + "appending it after a bar: <font face=\"monospace\">D:\\subs\\ep04.srt | 3.5</font>. "
+                + "A folder line shifts every .srt inside it ('Include sub-folders' reaches deeper), "
+                + "so batch-shifting a whole season is still one line. A one-time .bak of each "
+                + "original is kept and never overwritten - shifting the same files twice cannot "
+                + "destroy the originals.</p>");
     }
 
     private static void episodes(StringBuilder sb) {

@@ -1,5 +1,8 @@
 package movies.core;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Options shared by the CLI and the GUI.
  *
@@ -11,6 +14,33 @@ public class Options {
 
     /** Root folder the operation works on. */
     private String folder = "";
+
+    /** Shift passes: each holds one offset and the files/folders it applies to. */
+    private final List<ShiftGroup> shiftGroups = new ArrayList<ShiftGroup>();
+
+    /** One shift pass: a constant offset shared by all of its paths. */
+    public static final class ShiftGroup {
+        /** Offset in seconds for every path in this group (positive = later). */
+        public final double seconds;
+        /** Subtitle files and/or folders this offset applies to. */
+        public final List<String> paths = new ArrayList<String>();
+
+        public ShiftGroup(double seconds) {
+            this.seconds = seconds;
+        }
+    }
+
+    /** The shift passes to execute (may be empty - legacy single shift then). */
+    public List<ShiftGroup> getShiftGroups() {
+        return shiftGroups;
+    }
+
+    /** Starts a new shift pass with the given offset and returns it. */
+    public ShiftGroup addShiftGroup(double seconds) {
+        ShiftGroup group = new ShiftGroup(seconds);
+        shiftGroups.add(group);
+        return group;
+    }
 
     /** Secondary folder (e.g. where downloaded subtitles live). */
     private String secondaryFolder = "";

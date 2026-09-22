@@ -52,6 +52,7 @@ public final class SelfTest {
         testMerge();
         testShift();
         testShiftBatch();
+        testShiftMulti();
         testPatternTokens();
         testSanitizer();
         testRename();
@@ -842,6 +843,45 @@ public final class SelfTest {
                 RenameEngine.PatternBuilder.build("{title} ({s01e01}) ({year}){ext}", movie)));
         check("pattern unknown token kept literal", "The Flash {keep}.mp4".equals(
                 RenameEngine.PatternBuilder.build("{title} {keep}{ext}", parts)));
+    }
+
+    private static void testShiftMulti() throws IOException {
+        File dir = tempDir("shift-multi");
+        File a = touch(dir, "A.srt");
+        IoUtil.writeText(a, "1\n00:00:10,000 --> 00:00:12,000\nA\n");
+        File b = touch(dir, "B.srt");
+        IoUtil.writeText(b, "1\n00:00:10,000 --> 00:00:12,000\nB\n");
+        File c = touch(dir, "C.srt");
+        IoUtil.writeText(c, "1\n00:00:05,000 --> 00:00:06,000\nC\n");
+
+        // Two passes in one run: A and B share +2.5s, C is independent at -1s.
+        Options multi = new Options();
+        Options.ShiftGroup together = multi.addShiftGroup(2.5);
+        together.paths.add(a.getAbsolutePath());
+        together.paths.add(b.getAbsolutePath());
+        Options.ShiftGroup independent = multi.addShiftGroup(-1.0);
+        independent.paths.add(c.getAbsolutePath());
+        OperationResult result = new SubsShift().shift(multi);
+        check("multi runs", result.errorCount() == 0);
+        check("multi a", SubRip.loadSrt(a).cues().get(0).start == 12500);
+        check("multi b", SubRip.loadSrt(b).cues().get(0).start == 12500);
+        check("multi c", SubRip.loadSrt(c).cues().get(0).start == 4000);
+        check("multi summary", result.getReport().contains("2 pass(es)"));
+        check("multi backups", new File(dir, "A.srt.bak").exists() && new File(dir, "C.srt.bak").exists());
+
+        // A folder line inside a pass, next to a zero-offset pass that must error.
+        Options mixed = new Options();
+        Options.ShiftGroup folderPass = mixed.addShiftGroup(1.0);
+        folderPass.paths.add(dir.getAbsolutePath());
+        Options.ShiftGroup zeroPass = mixed.addShiftGroup(0);
+        zeroPass.paths.add(a.getAbsolutePath());
+        OperationResult mixedResult = new SubsShift().shift(mixed);
+        check("multi zero pass errors", mixedResult.errorCount() == 1);
+        check("multi folder pass ran", mixedResult.getReport().startsWith("3 subtitle file(s) shifted"));
+
+        // Empty request errors clearly.
+        Options empty = new Options();
+        check("multi empty errors", new SubsShift().shift(empty).errorCount() == 1);
     }
 
     private static void testFlatten() throws IOException {

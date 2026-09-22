@@ -24,6 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -598,34 +599,112 @@ public final class Cli {
         public String name() { return "shift-subs"; }
         public String summary() { return "Shift subtitle timing by a constant offset"; }
         public String usage() {
-            return "Usage: movietool shift-subs <file.srt | folder> --seconds <n> [-o out.srt] [--no-backup] [-r]\n"
+            return "Usage: movietool shift-subs (--seconds <n> <files/folders>...) [--seconds <n2> <files>...]\n"
+                    + "                     [-r] [-o out.srt] [--no-backup]\n"
                     + "\nPositive values delay the subtitles, negative values advance them.\n"
-                    + "Give a FOLDER to shift every .srt inside it at once (-r includes\n"
-                    + "sub-folders). A .bak copy is kept next to each original unless\n"
-                    + "--no-backup is given.\n"
-                    + "      --seconds <n.n>   Amount to shift, e.g. 2.5 or -3\n";
+                    + "\nAny number of files/folders, and any number of passes: every\n"
+                    + "--seconds starts a pass, and the files after it share that shift\n"
+                    + "until the next --seconds. All passes run in the SAME command:\n"
+                    + "  movietool shift-subs --seconds 2.5 a.srt b.srt     both +2.5s\n"
+                    + "  movietool shift-subs --seconds 2.5 a.srt b.srt --seconds -1 c.srt\n"
+                    + "      a and b +2.5s while c moves 1s earlier, all in one run\n"
+                    + "Files listed BEFORE the first --seconds join that first pass, so the\n"
+                    + "older shape 'shift-subs file.srt --seconds 2.5' still works.\n"
+                    + "A FOLDER shifts every .srt inside it (-r includes sub-folders).\n"
+                    + "A .bak copy is kept next to each original unless --no-backup is given\n"
+                    + "(it is never overwritten, so shifting twice stays safe).\n";
         }
         public int execute(String[] args) {
             ArgParser argsParser = new ArgParser(args, aliases(), booleanFlags());
             Options options = baseOptions(argsParser);
-            List<String> positionals = argsParser.positionals();
-            if (!positionals.isEmpty()) options.setFolder(positionals.get(0));
-            String seconds = argsParser.value("seconds", "");
-            if (seconds.isEmpty()) {
-                System.err.println("--seconds is required.");
-                System.err.println(usage());
-                return EXIT_USAGE;
+            options.setBackup(!argsParser.flag("no-backup"));
+
+            // Raw scan so files group under the --seconds that owns them.
+            // Spellings of flags that take a value, so their values are never
+            // mistaken for paths.
+            Set<String> valueFlags = new HashSet<String>();
+            for (Map.Entry<String, String> entry : aliases().entrySet()) {
+                if (booleanFlags().contains(entry.getKey())) continue;
+                for (String spelling : entry.getValue().split(",")) valueFlags.add(spelling.trim());
             }
-            try {
-                options.setShiftSeconds(Double.parseDouble(seconds));
-            } catch (NumberFormatException e) {
-                System.err.println("Not a number: " + seconds);
-                return EXIT_USAGE;
+            List<String> pending = new ArrayList<String>();
+            Options.ShiftGroup current = null;
+            for (int i = 0; i < args.length; i++) {
+                String arg = args[i];
+                String spelling = arg;
+                String inline = null;
+                if (arg.startsWith("-")) {
+                    int eq = arg.indexOf('=');
+                    if (eq > 0) {
+                        spelling = arg.substring(0, eq);
+                        inline = arg.substring(eq + 1);
+                    }
+                }
+                if (arg.equals("--")) {
+                    for (int j = i + 1; j < args.length; j++) pending.add(args[j]);
+                    break;
+                }
+                boolean takesValue = valueFlags.contains(spelling);
+                if (takesValue && inline != null) {
+                    if (isSeconds(spelling)) {
+                        Double value = parseSeconds(inline);
+                        if (value == null) { System.err.println("Not a number: " + inline); return EXIT_USAGE; }
+                        current = options.addShiftGroup(value.doubleValue());
+                    }
+                    continue;
+                }
+                if (takesValue) {
+                    if (i + 1 >= args.length) break;
+                    if (isSeconds(spelling)) {
+                        Double value = parseSeconds(args[i + 1]);
+                        if (value == null) { System.err.println("Not a number: " + args[i + 1]); return EXIT_USAGE; }
+                        current = options.addShiftGroup(value.doubleValue());
+                    }
+                    i++;
+                    continue;
+                }
+                if (arg.startsWith("-") && !arg.equals("-")) continue;
+                if (current == null) pending.add(arg);
+                else current.paths.add(arg);
+            }
+            if (!pending.isEmpty()) {
+                if (options.getShiftGroups().isEmpty()) {
+                    System.err.println("--seconds is required.");
+                    System.err.println(usage());
+                    return EXIT_USAGE;
+                }
+                // Files listed BEFORE the first --seconds join that first pass.
+                options.getShiftGroups().get(0).paths.addAll(0, pending);
+            }
+            if (options.getShiftGroups().isEmpty()) {
+                // No groups and no positionals (e.g. -d file --seconds n): the
+                // legacy single-file path via folder + shiftSeconds.
+                String seconds = argsParser.value("seconds", "");
+                if (seconds.isEmpty()) {
+                    System.err.println("--seconds is required.");
+                    System.err.println(usage());
+                    return EXIT_USAGE;
+                }
+                Double value = parseSeconds(seconds);
+                if (value == null) { System.err.println("Not a number: " + seconds); return EXIT_USAGE; }
+                options.setShiftSeconds(value.doubleValue());
             }
             SubsShift shifter = new SubsShift();
             OperationResult result = shifter.shift(options);
             print(result, options);
             return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+        }
+
+        private static boolean isSeconds(String spelling) {
+            return spelling.equals("--seconds");
+        }
+
+        private static Double parseSeconds(String raw) {
+            try {
+                return Double.valueOf(raw);
+            } catch (NumberFormatException e) {
+                return null;
+            }
         }
     }
 
