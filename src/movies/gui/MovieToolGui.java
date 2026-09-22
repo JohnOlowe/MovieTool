@@ -50,8 +50,7 @@ public final class MovieToolGui extends JFrame {
     private final OpCard[] cardArray;
     private final DefaultListModel<String> cardTitles = new DefaultListModel<String>();
     private final JList<String> cardList = new JList<String>(cardTitles);
-    private final JPanel cardPanel = new JPanel();
-    private final java.awt.CardLayout cardLayout = new java.awt.CardLayout();
+    private final JPanel cardPanel = new JPanel(new BorderLayout());
 
     private final JButton runButton = new JButton();
     private final JButton applyButton = new JButton("Apply");
@@ -146,15 +145,12 @@ public final class MovieToolGui extends JFrame {
             }
         });
 
-        cardPanel.setLayout(cardLayout);
-        for (OpCard card : cards) cardPanel.add(card.component(), card.getTitle());
-
         // The Help entry: not an operation, just the guide.
         javax.swing.JEditorPane helpPane = new javax.swing.JEditorPane("text/html", "");
         helpPane.setEditable(false);
         helpPane.setText(HelpBook.html());
         helpPane.setCaretPosition(0);
-        cardPanel.add(new JScrollPane(helpPane), "Help");
+        cardPanel.add(new JScrollPane(helpPane), BorderLayout.CENTER);
         cardTitles.addElement("Help");
 
         JPanel listPanel = new JPanel(new BorderLayout());
@@ -230,25 +226,48 @@ public final class MovieToolGui extends JFrame {
                 if (worker != null) worker.cancel(true);
             }
         });
+
+        // Say what was actually built - this is the first place to look when
+        // something on screen is missing.
+        StringBuilder summary = new StringBuilder("MovieTool " + Version.TEXT
+                + " ready - " + cards.size() + " function(s) loaded.");
+        if (cards.size() != cardTitles.size() - 1) {
+            summary.append(" NOTE: list shows ").append(cardTitles.size() - 1).append(" entries.");
+        }
+        log(summary.toString());
     }
 
     private void selectCard(int index) {
         if (index < 0 || index > cards.size()) index = 0;
+        // Direct swap: remove everything and add the one component to show.
+        // No name-based lookup that could silently no-op and leave the form
+        // area blank (reported from the field on Windows).
+        cardPanel.removeAll();
         if (index == cards.size()) {
             current = null;
             cardList.setSelectedIndex(index);
-            cardLayout.show(cardPanel, "Help");
+            cardPanel.add(buildHelpView(), BorderLayout.CENTER);
             descriptionLabel.setText("Help - what every function does and when to use it.");
             runButton.setEnabled(false);
             applyButton.setEnabled(false);
-            return;
+        } else {
+            current = cards.get(index);
+            cardList.setSelectedIndex(index);
+            cardPanel.add(current.component(), BorderLayout.NORTH);
+            descriptionLabel.setText(current.getDescription());
+            runButton.setEnabled(true);
+            updateApplyButton();
         }
-        current = cards.get(index);
-        cardList.setSelectedIndex(index);
-        cardLayout.show(cardPanel, current.getTitle());
-        descriptionLabel.setText(current.getDescription());
-        runButton.setEnabled(true);
-        updateApplyButton();
+        cardPanel.revalidate();
+        cardPanel.repaint();
+    }
+
+    private static javax.swing.JScrollPane buildHelpView() {
+        javax.swing.JEditorPane helpPane = new javax.swing.JEditorPane("text/html", "");
+        helpPane.setEditable(false);
+        helpPane.setText(HelpBook.html());
+        helpPane.setCaretPosition(0);
+        return new javax.swing.JScrollPane(helpPane);
     }
 
     // ------------------------------------------------------------- running

@@ -734,13 +734,15 @@ final class Cards {
         private final JTextField file = form.addPathField("Subtitles:", false);
         private final JSpinner seconds = new JSpinner(new SpinnerNumberModel(Double.valueOf(0), Double.valueOf(-600),
                 Double.valueOf(600), Double.valueOf(0.5)));
-        private final JCheckBox backup = form.addCheckbox("Keep a .bak copy", true);
-        private final SubsShift shifter = new SubsShift();
+        private final JCheckBox backup;
 
         ShiftCard() {
             super("Shift timing", "Move every subtitle earlier or later by a constant amount (positive = later).");
             form.addRow("Shift by (seconds):", seconds, new JLabel("negative = earlier, positive = later"));
+            backup = form.addCheckbox("Keep a .bak copy", true);
         }
+
+        private final SubsShift shifter = new SubsShift();
 
         @Override
         public JComponent component() {

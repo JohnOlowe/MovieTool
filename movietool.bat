@@ -37,10 +37,10 @@ if not exist "%JAR%" (
 
 rem No arguments: launch the window without keeping a console open.
 if "%~1"=="" (
-    start "" "%JAVA%" -Dfile.encoding=UTF-8 -jar "%JAR%"
+    start "" "%JAVA%" -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dfile.encoding=UTF-8 -jar "%JAR%"
     endlocal
     exit /b 0
 )
 
-"%JAVA%" -Dfile.encoding=UTF-8 -jar "%JAR%" %*
+"%JAVA%" -Dsun.java2d.d3d=false -Dsun.java2d.noddraw=true -Dfile.encoding=UTF-8 -jar "%JAR%" %*
 endlocal
