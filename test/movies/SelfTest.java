@@ -51,6 +51,8 @@ public final class SelfTest {
         testVttParsing();
         testMerge();
         testShift();
+        testShiftBatch();
+        testPatternTokens();
         testSanitizer();
         testRename();
         testImdbRename();
@@ -768,6 +770,78 @@ public final class SelfTest {
         socket.getOutputStream().write(body);
         socket.getOutputStream().flush();
         socket.close();
+    }
+
+    private static void testShiftBatch() throws IOException {
+        File dir = tempDir("shift-batch");
+        touch(dir, "EP1.srt");
+        IoUtil.writeText(new File(dir, "EP1.srt"), "1\n00:00:10,000 --> 00:00:12,000\nOne\n");
+        touch(dir, "EP2.srt");
+        IoUtil.writeText(new File(dir, "EP2.srt"), "1\n00:00:05,000 --> 00:00:06,000\nTwo\n");
+        IoUtil.writeText(new File(dir, "EP2.srt.bak"), "old\n");
+        touch(dir, "notes.txt");
+        File deep = mkdir(dir, "Season 1");
+        touch(deep, "EP3.srt");
+        IoUtil.writeText(new File(deep, "EP3.srt"), "1\n00:00:00,000 --> 00:00:01,000\nThree\n");
+
+        // Folder mode, top level only: the deep one and the .bak are untouched.
+        Options top = options(dir.getAbsolutePath());
+        top.setShiftSeconds(2.0);
+        OperationResult result = new SubsShift().shift(top);
+        check("batch top-level count", result.getReport().startsWith("2 subtitle file(s) shifted"));
+        check("batch shifted EP1", SubRip.loadSrt(new File(dir, "EP1.srt")).cues().get(0).start == 12000);
+        check("batch shifted EP2", SubRip.loadSrt(new File(dir, "EP2.srt")).cues().get(0).start == 7000);
+        check("batch kept EP1 backup", new File(dir, "EP1.srt.bak").exists());
+        check("batch skipped old bak", "old\n".equals(IoUtil.readText(new File(dir, "EP2.srt.bak"))));
+        check("batch left deep file", SubRip.loadSrt(new File(deep, "EP3.srt")).cues().get(0).start == 0);
+        check("batch ignored non-subs", new File(dir, "notes.txt").exists());
+
+        // Recursive mode reaches "Season 1".
+        Options deepOptions = options(dir.getAbsolutePath());
+        deepOptions.setShiftSeconds(-60.0);
+        deepOptions.setRecursive(true);
+        OperationResult result2 = new SubsShift().shift(deepOptions);
+        check("batch recursive count", result2.getReport().startsWith("3 subtitle file(s) shifted"));
+        check("batch deep shifted", SubRip.loadSrt(new File(deep, "EP3.srt")).cues().get(0).start == 0);
+    }
+
+    private static void testPatternTokens() {
+        FileNameParts parts = new FileNameParts();
+        parts.setTitle("The Flash");
+        parts.setYear(2014);
+        parts.setSeason(1);
+        parts.setEpisode(2);
+        parts.setEpisodeTitle("Fastest Man Alive");
+        parts.setQuality(1080);
+        parts.setLanguage("en");
+        parts.setExtension(".mp4");
+        parts.setOriginalName("the_flash_2014_s01e02.mp4");
+
+        check("pattern s01e01", "The Flash - S01E02.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} - {s01e01}{ext}", parts)));
+        check("pattern 1x01", "The Flash - 1x02.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} - {1x01}{ext}", parts)));
+        check("pattern s1e1", "The Flash 1E2.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} {s1e1}{ext}", parts)));
+        check("pattern numbers", "The Flash 1 2 2014.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} {season} {episode} {year}{ext}", parts)));
+        check("pattern episodeTitle+quality", "The Flash - Fastest Man Alive - 1080P.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} - {episodeTitle} - {quality}{ext}", parts)));
+        check("pattern original+language", "the_flash_2014_s01e02 en.mp4".equals(
+                RenameEngine.PatternBuilder.build("{original} {language}{ext}", parts)));
+
+        // Movie-like parts (no episode data): episode tokens empty, title left.
+        FileNameParts movie = new FileNameParts();
+        movie.setTitle("The Flash");
+        movie.setYear(2014);
+        movie.setExtension(".mp4");
+        movie.setOriginalName("the_flash_2014.mp4");
+        check("pattern empty token cleaned", "The Flash.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} {episodeTitle}{ext}", movie)));
+        check("pattern episode tokens empty on movies", "The Flash (2014).mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} ({s01e01}) ({year}){ext}", movie)));
+        check("pattern unknown token kept literal", "The Flash {keep}.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} {keep}{ext}", parts)));
     }
 
     private static void testFlatten() throws IOException {

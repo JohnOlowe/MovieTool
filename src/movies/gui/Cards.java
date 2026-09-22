@@ -142,7 +142,7 @@ final class Cards {
         private final Form form = new Form();
         private final JTextField dir = form.addPathField("Folder:", true);
         private final JComboBox<String> target = new JComboBox<String>();
-        private final JTextField pattern = form.addTextField("Or custom pattern:", "{title} {s01e01}{ext}");
+        private final JTextField pattern = form.addTextField("Or custom pattern:", "{title} {s01e01}{ext} - tokens in Help");
         private final JTextField conventions = form.addTextField("Only detect:", "e.g. moviebox,awafim (blank = all)");
         private final JCheckBox recursive = form.addCheckbox("Include sub-folders", false);
         private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
@@ -731,15 +731,17 @@ final class Cards {
 
     static final class ShiftCard extends OpCard {
         private final Form form = new Form();
-        private final JTextField file = form.addPathField("Subtitles:", false);
+        private final JTextField file = form.addPathField("Subtitles:", false,
+                "one .srt file - or a folder to shift every .srt in it");
         private final JSpinner seconds = new JSpinner(new SpinnerNumberModel(Double.valueOf(0), Double.valueOf(-600),
                 Double.valueOf(600), Double.valueOf(0.5)));
+        private final JCheckBox recursive = form.addCheckbox("Include sub-folders (in folder mode)", false);
         private final JCheckBox backup;
 
         ShiftCard() {
-            super("Shift timing", "Move every subtitle earlier or later by a constant amount (positive = later).");
+            super("Shift timing", "Delay or advance one subtitle - or every .srt in a folder at once - by a constant amount (positive = later). A .bak copy of each original is kept.");
             form.addRow("Shift by (seconds):", seconds, new JLabel("negative = earlier, positive = later"));
-            backup = form.addCheckbox("Keep a .bak copy", true);
+            backup = form.addCheckbox("Keep a .bak copy of each file", true);
         }
 
         private final SubsShift shifter = new SubsShift();
@@ -753,6 +755,7 @@ final class Cards {
         public void collect(Options options) {
             options.setFolder(file.getText().trim());
             options.setShiftSeconds(((Number) seconds.getValue()).doubleValue());
+            options.setRecursive(recursive.isSelected());
             options.setBackup(backup.isSelected());
         }
 

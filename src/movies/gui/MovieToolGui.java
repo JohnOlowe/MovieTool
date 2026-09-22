@@ -267,7 +267,26 @@ public final class MovieToolGui extends JFrame {
         helpPane.setEditable(false);
         helpPane.setText(HelpBook.html());
         helpPane.setCaretPosition(0);
-        return new javax.swing.JScrollPane(helpPane);
+        final javax.swing.JScrollPane helpScroll = new javax.swing.JScrollPane(helpPane);
+        // Bound the preferred size: unbounded, the long guide's preferred
+        // height pushed the split's top pane to (almost) the full window and
+        // squeezed the Log section out of sight.
+        helpScroll.setPreferredSize(new Dimension(640, 240));
+        // Deterministic wheel handling: consume the event and scroll the
+        // viewport directly. Mouse wheels that delegate oddly (precision
+        // touchpads on old JREs) still move the page instead of nothing.
+        helpPane.addMouseWheelListener(new java.awt.event.MouseWheelListener() {
+            @Override
+            public void mouseWheelMoved(java.awt.event.MouseWheelEvent event) {
+                event.consume();
+                javax.swing.JScrollBar bar = helpScroll.getVerticalScrollBar();
+                int amount = event.getScrollType() == java.awt.event.MouseWheelEvent.WHEEL_UNIT_SCROLL
+                        ? event.getUnitsToScroll() * helpPane.getFont().getSize() + 12
+                        : event.getWheelRotation() * 60;
+                bar.setValue(bar.getValue() + amount);
+            }
+        });
+        return helpScroll;
     }
 
     // ------------------------------------------------------------- running

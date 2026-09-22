@@ -211,7 +211,9 @@ public final class Cli {
                     + "\nRenames media files to a naming convention. Dry-run by default.\n"
                     + "  -d, --dir <folder>       Folder to scan\n"
                     + "  -t, --to <convention>    Target convention id (see 'movietool conventions')\n"
-                    + "      --pattern <pattern>  Custom name, e.g. \"{title} {s01e01}{ext}\"\n"
+                    + "      --pattern <pattern>  Custom name from tokens: {title} {year} {s01e01}\n"
+                    + "                           {s1e1} {1x01} {season} {episode} {episodeTitle}\n"
+                    + "                           {quality} {language} {ext} {original}\n"
                     + "  -c, --conventions <ids>  Restrict auto-detection, e.g. moviebox,awafim\n"
                     + "  -r, --recursive          Include sub-folders\n"
                     + "      --apply              Really rename (default is a dry run)\n"
@@ -596,9 +598,11 @@ public final class Cli {
         public String name() { return "shift-subs"; }
         public String summary() { return "Shift subtitle timing by a constant offset"; }
         public String usage() {
-            return "Usage: movietool shift-subs <file.srt> --seconds <n> [-o out.srt] [--no-backup]\n"
+            return "Usage: movietool shift-subs <file.srt | folder> --seconds <n> [-o out.srt] [--no-backup] [-r]\n"
                     + "\nPositive values delay the subtitles, negative values advance them.\n"
-                    + "A .bak copy is kept next to the original unless --no-backup is given.\n"
+                    + "Give a FOLDER to shift every .srt inside it at once (-r includes\n"
+                    + "sub-folders). A .bak copy is kept next to each original unless\n"
+                    + "--no-backup is given.\n"
                     + "      --seconds <n.n>   Amount to shift, e.g. 2.5 or -3\n";
         }
         public int execute(String[] args) {

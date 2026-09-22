@@ -60,10 +60,28 @@ final class HelpBook {
 
     private static void rename(StringBuilder sb) {
         sb.append("<h4>Rename</h4><p>Renames videos <i>and</i> subtitles to one clean convention "
-                + "(or to your own pattern like <font face=\"monospace\">{title} {s01e01}{ext}</font>). "
-                + "Use it to normalise a messy folder; auto-detection picks each file's site format "
-                + "and the target convention cleans it up. Subtitles are renamed to match their "
-                + "video, which is what players expect.</p>");
+                + "or to your own pattern. Auto-detection picks each file's site format and the "
+                + "target cleans it up; subtitles are renamed to match their video, which is what "
+                + "players expect.</p>");
+        sb.append("<p><b>Custom pattern tokens</b> (case-insensitive; leave out what you do not "
+                + "want - empty tokens and their spaces are cleaned up automatically):</p>"
+                + "<table cellpadding=\"3\">"
+                + "<tr><td><font face=\"monospace\">{title}</font></td><td>show or movie title</td>"
+                + "<td><font face=\"monospace\">{year}</font></td><td>release year</td></tr>"
+                + "<tr><td><font face=\"monospace\">{s01e01}</font></td><td>episode as S01E02</td>"
+                + "<td><font face=\"monospace\">{1x01}</font></td><td>episode as 1x02</td></tr>"
+                + "<tr><td><font face=\"monospace\">{s1e1}</font></td><td>episode as 1E2</td>"
+                + "<td><font face=\"monospace\">{season}</font> / <font face=\"monospace\">{episode}</font></td><td>numbers alone (1 / 2)</td></tr>"
+                + "<tr><td><font face=\"monospace\">{episodeTitle}</font></td><td>episode title when the source name carries one</td>"
+                + "<td><font face=\"monospace\">{quality}</font></td><td>e.g. 1080P</td></tr>"
+                + "<tr><td><font face=\"monospace\">{language}</font></td><td>language token of subtitles</td>"
+                + "<td><font face=\"monospace\">{ext}</font></td><td>the file's extension</td></tr>"
+                + "<tr><td><font face=\"monospace\">{original}</font></td><td>original name without extension</td>"
+                + "<td></td><td></td></tr></table>"
+                + "<p>Example: <font face=\"monospace\">{title} - {1x01} - {episodeTitle}{ext}</font> gives "
+                + "<font face=\"monospace\">The Flash - 1x02 - Fastest Man Alive.mp4</font>. A token that does not "
+                + "apply (like <font face=\"monospace\">{s01e01}</font> on a movie) becomes empty, so one pattern "
+                + "works for mixed folders.</p>");
     }
 
     private static void imdb(StringBuilder sb) {
@@ -142,9 +160,12 @@ final class HelpBook {
     }
 
     private static void shift(StringBuilder sb) {
-        sb.append("<h4>Shift timing</h4><p>Moves every cue of a subtitle earlier or later by a "
-                + "constant amount when the file is consistently out of sync. A .bak backup of the "
-                + "original is kept.</p>");
+        sb.append("<h4>Shift timing</h4><p>Delays or advances subtitles by a constant amount when "
+                + "they are consistently out of sync (positive seconds = later, negative = earlier). "
+                + "Give ONE .srt file, or a FOLDER to shift every .srt inside it at once - tick "
+                + "'Include sub-folders' to cover those too. A .bak copy of each original is kept "
+                + "(untick to skip that). Use the Collect/Download functions first if your subtitles "
+                + "still live elsewhere.</p>");
     }
 
     private static void episodes(StringBuilder sb) {
@@ -179,6 +200,10 @@ final class HelpBook {
                 + "along and both keep matching names.</li>");
         sb.append("<li>On the command line every function has the same name as here: "
                 + "<font face=\"monospace\">movietool help &lt;function&gt;</font> shows its options.</li>");
+        sb.append("<li><b>Touchpad scrolling:</b> smooth two-finger scrolling in the Help and Log "
+                + "panes needs a current Java runtime (Java 11 or newer, e.g. Eclipse Temurin). "
+                + "On old Java 8 runtimes use the scroll bar on the right; the mouse wheel always "
+                + "works.</li>");
         sb.append("</ul>");
     }
 }

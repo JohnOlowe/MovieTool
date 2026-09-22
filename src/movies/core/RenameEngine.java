@@ -150,8 +150,11 @@ public class RenameEngine {
         }
 
         /**
-         * Supported tokens: {title} {year} {s01e01} {s1e1} {season} {episode}
-         * {episodeTitle} {quality} {language} {ext} {original}.
+         * Supported tokens (case-insensitive): {title} {year} {s01e01}
+         * {s1e1} {1x01} {season} {episode} {episodeTitle} {quality}
+         * {language} {ext} {original}. Unknown tokens stay literally in the
+         * name; tokens that do not apply (e.g. {episode} on a movie) become
+         * empty and are cleaned up with their surrounding spaces.
          */
         public static String build(String pattern, FileNameParts parts) {
             StringBuilder sb = new StringBuilder();
@@ -171,8 +174,9 @@ public class RenameEngine {
                 i = close;
             }
             return sb.toString()
-                    .replaceAll("\\s+\\.", ".")   // no space before the extension
-                    .replaceAll("\\s{2,}", " ")   // collapse gaps left by empty tokens
+                    .replaceAll("\\s+\\.", ".")      // no space before the extension
+                    .replaceAll("\\(\\s*\\)", "")      // () groups emptied by tokens
+                    .replaceAll("\\s{2,}", " ")      // collapse gaps left by empty tokens
                     .trim();
         }
 
@@ -189,6 +193,7 @@ public class RenameEngine {
             if ("original".equals(t)) return stripAnyExtension(p.getOriginalName());
             if ("s01e01".equals(t)) return p.isEpisode() ? "S" + pad2(p.getSeason()) + "E" + pad2(p.getEpisode()) : "";
             if ("s1e1".equals(t)) return p.isEpisode() ? p.getSeason() + "E" + p.getEpisode() : "";
+            if ("1x01".equals(t)) return p.isEpisode() ? p.getSeason() + "x" + pad2(p.getEpisode()) : "";
             return "{" + token + "}";
         }
 
