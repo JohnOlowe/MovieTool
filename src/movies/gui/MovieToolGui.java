@@ -32,6 +32,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Toolkit;
 import java.awt.HeadlessException;
 import java.awt.event.ActionEvent;
 import java.awt.event.WindowAdapter;
@@ -72,11 +73,16 @@ public final class MovieToolGui extends JFrame {
 
     private MovieToolGui() {
         super("MovieTool " + Version.TEXT);
-        this.cards = Cards.all();
+        this.cards = buildCards();
         this.cardArray = cards.toArray(new OpCard[cards.size()]);
         buildUi();
         selectCard(0);
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+    }
+
+    /** Cards.all() is fault-tolerant: a broken card skips itself. */
+    private static List<OpCard> buildCards() {
+        return Cards.all();
     }
 
     /** Opens the window on the event dispatch thread. */
@@ -91,12 +97,35 @@ public final class MovieToolGui extends JFrame {
                 }
                 try {
                     MovieToolGui gui = new MovieToolGui();
-                    gui.setSize(980, 720);
-                    gui.setMinimumSize(new Dimension(760, 520));
-                    gui.setLocationByPlatform(true);
+                    // Fit the screen: a fixed 980x720 window is useless on a
+                    // small display (e.g. a phone screen over termux-x11) -
+                    // it can end up showing nothing usable at all.
+                    Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+                    int width = Math.min(980, (int) (screen.width * 0.94));
+                    int height = Math.min(720, (int) (screen.height * 0.90));
+                    gui.setSize(width, height);
+                    gui.setMinimumSize(new Dimension(Math.min(640, width), Math.min(420, height)));
+                    gui.setLocationRelativeTo(null);
                     gui.setVisible(true);
                 } catch (HeadlessException e) {
                     System.err.println("No display is available; use the command line instead ('movietool help').");
+                } catch (Throwable t) {
+                    // A broken environment must never fail SILENTLY (blank or
+                    // missing window): show and log exactly what happened.
+                    t.printStackTrace();
+                    System.err.println("The graphical interface failed to start: " + t);
+                    System.err.println("The command line still works: movietool help");
+                    try {
+                        java.io.StringWriter trace = new java.io.StringWriter();
+                        t.printStackTrace(new java.io.PrintWriter(trace));
+                        javax.swing.JOptionPane.showMessageDialog(null,
+                                "MovieTool could not start:\n\n" + t
+                                        + "\n\nThe command line still works ('movietool help').\n\nDetails:\n"
+                                        + trace.toString().substring(0, Math.min(trace.toString().length(), 1200)),
+                                "MovieTool - startup problem", javax.swing.JOptionPane.ERROR_MESSAGE);
+                    } catch (Throwable ignore2) {
+                        // even the dialog failed - the console output stands
+                    }
                 }
             }
         });

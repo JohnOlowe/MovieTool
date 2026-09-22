@@ -739,6 +739,7 @@ final class Cards {
 
         ShiftCard() {
             super("Shift timing", "Move every subtitle earlier or later by a constant amount (positive = later).");
+            form.addRow("Shift by (seconds):", seconds, new JLabel("negative = earlier, positive = later"));
         }
 
         @Override
@@ -819,20 +820,34 @@ final class Cards {
         }
     }
 
+    /** Creates one card, shielding the window from a broken constructor. */
+    private interface CardMaker {
+        OpCard make();
+    }
+
     static List<OpCard> all() {
         List<OpCard> cards = new ArrayList<OpCard>();
-        cards.add(new RenameCard());
-        cards.add(new ImdbCard());
-        cards.add(new CleanTitlesCard());
-        cards.add(new SyncCard());
-        cards.add(new RelocateCard());
-        cards.add(new DownloadSubsCard());
-        cards.add(new FlattenCard());
-        cards.add(new MergeCard());
-        cards.add(new VttCard());
-        cards.add(new ShiftCard());
-        cards.add(new EpisodesCard());
-        cards.add(new CheckCard());
+        tryAdd(cards, "Rename", new CardMaker() { @Override public OpCard make() { return new RenameCard(); } });
+        tryAdd(cards, "IMDB rename", new CardMaker() { @Override public OpCard make() { return new ImdbCard(); } });
+        tryAdd(cards, "Clean titles list", new CardMaker() { @Override public OpCard make() { return new CleanTitlesCard(); } });
+        tryAdd(cards, "Sync subtitles", new CardMaker() { @Override public OpCard make() { return new SyncCard(); } });
+        tryAdd(cards, "Collect subtitles", new CardMaker() { @Override public OpCard make() { return new RelocateCard(); } });
+        tryAdd(cards, "Download subtitles", new CardMaker() { @Override public OpCard make() { return new DownloadSubsCard(); } });
+        tryAdd(cards, "Flatten", new CardMaker() { @Override public OpCard make() { return new FlattenCard(); } });
+        tryAdd(cards, "Merge subtitles", new CardMaker() { @Override public OpCard make() { return new MergeCard(); } });
+        tryAdd(cards, "VTT to SRT", new CardMaker() { @Override public OpCard make() { return new VttCard(); } });
+        tryAdd(cards, "Shift timing", new CardMaker() { @Override public OpCard make() { return new ShiftCard(); } });
+        tryAdd(cards, "Episodes", new CardMaker() { @Override public OpCard make() { return new EpisodesCard(); } });
+        tryAdd(cards, "Library check", new CardMaker() { @Override public OpCard make() { return new CheckCard(); } });
         return cards;
+    }
+
+    /** One broken card skips itself instead of blanking the whole window. */
+    private static void tryAdd(List<OpCard> cards, String title, CardMaker maker) {
+        try {
+            cards.add(maker.make());
+        } catch (Throwable t) {
+            System.err.println("[GUI] card '" + title + "' could not be built: " + t);
+        }
     }
 }
