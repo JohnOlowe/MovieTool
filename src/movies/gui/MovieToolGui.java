@@ -86,6 +86,17 @@ public final class MovieToolGui extends JFrame {
 
     /** Opens the window on the event dispatch thread. */
     public static void launch() {
+        // Take Swing off the Windows Direct3D pipeline BEFORE any window is
+        // created. The movietool.bat launcher passes these as JVM flags, but
+        // a double-clicked movietool.jar skips the bat - and D3D is the
+        // classic cause of stale/blank panels on Windows (e.g. after the
+        // file-chooser dialog). Harmless on other systems.
+        String os = System.getProperty("os.name", "").toLowerCase();
+        final boolean windows = os.contains("windows");
+        if (windows) {
+            System.setProperty("sun.java2d.noddraw", "true");
+            System.setProperty("sun.java2d.d3d", "false");
+        }
         SwingUtilities.invokeLater(new Runnable() {
             @Override
             public void run() {
@@ -234,6 +245,9 @@ public final class MovieToolGui extends JFrame {
         // something on screen is missing.
         StringBuilder summary = new StringBuilder("MovieTool " + Version.TEXT
                 + " ready - " + cards.size() + " function(s) loaded.");
+        if (System.getProperty("os.name", "").toLowerCase().contains("windows")) {
+            summary.append(" (Windows: Direct3D rendering disabled for reliability)");
+        }
         if (cards.size() != cardTitles.size() - 1) {
             summary.append(" NOTE: list shows ").append(cardTitles.size() - 1).append(" entries.");
         }

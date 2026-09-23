@@ -115,6 +115,37 @@ final class Cards {
             row++;
         }
 
+        /**
+         * Like addRow, but the left component stretches vertically when the
+         * card area grows (e.g. a tall hand-picked file list). Weighty 1000
+         * beats the bottom filler, so the stretch goes here, not to the filler.
+         */
+        void addRowTall(String label, JComponent left, String hint) {
+            GridBagConstraints c = new GridBagConstraints();
+            c.gridx = 0;
+            c.gridy = row;
+            c.anchor = GridBagConstraints.NORTH;
+            c.insets = new Insets(8, 8, 4, 4);
+            panel.add(new JLabel(label), c);
+            c = new GridBagConstraints();
+            c.gridx = 1;
+            c.gridy = row;
+            c.fill = GridBagConstraints.BOTH;
+            c.weightx = 1.0;
+            c.weighty = 1000.0;
+            c.insets = new Insets(4, 4, 4, 4);
+            panel.add(left, c);
+            if (hint != null) {
+                c = new GridBagConstraints();
+                c.gridx = 2;
+                c.gridy = row;
+                c.anchor = GridBagConstraints.NORTHWEST;
+                c.insets = new Insets(8, 4, 4, 8);
+                panel.add(new JLabel(hint), c);
+            }
+            row++;
+        }
+
         JPanel panel() {
             JPanel wrapper = new JPanel(new GridBagLayout());
             GridBagConstraints c = new GridBagConstraints();
@@ -754,10 +785,10 @@ final class Cards {
 
         ShiftCard() {
             super("Shift timing", "Delay or advance subtitles by a constant amount (positive = later). Hand-pick any number of files/folders - one per line - all shifted in ONE run; give any line its own time with 'path | 3.5'. A one-time .bak of each original is kept.");
-            files.setRows(7);
+            files.setRows(12);
             files.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12));
             javax.swing.JScrollPane listScroll = new javax.swing.JScrollPane(files);
-            listScroll.setPreferredSize(new java.awt.Dimension(520, 130));
+            listScroll.setPreferredSize(new java.awt.Dimension(520, 200));
             JButton addFiles = new JButton("Add files...");
             addFiles.addActionListener(new java.awt.event.ActionListener() {
                 @Override
@@ -776,11 +807,24 @@ final class Cards {
                             existing = existing + "\n";
                         }
                         files.setText(existing + extra.toString());
+                        // Some Windows render pipelines leave stale pixels
+                        // after a modal dialog closes: repaint explicitly.
+                        files.revalidate();
+                        files.repaint();
+                        form.panel().revalidate();
+                        form.panel().repaint();
+                        javax.swing.SwingUtilities.invokeLater(new Runnable() {
+                            @Override
+                            public void run() {
+                                java.awt.Window window = javax.swing.SwingUtilities.getWindowAncestor(form.panel());
+                                if (window != null) window.repaint();
+                            }
+                        });
                     }
                 }
             });
             form.addRow("Files / folders:", addFiles, new JLabel("one per line; a folder line shifts every .srt inside it"));
-            form.addRow("Hand-picked list:", listScroll, new JLabel("path | 3.5 = this file gets its own shift time"));
+            form.addRowTall("Hand-picked list:", listScroll, "path | 3.5 = this file gets its own shift time");
             form.addRow("Shift by (seconds):", seconds, new JLabel("used for lines without their own | time"));
             recursive = form.addCheckbox("Include sub-folders (for folder lines)", false);
             backup = form.addCheckbox("Keep a .bak copy of each file", true);
