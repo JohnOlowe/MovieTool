@@ -308,6 +308,16 @@ public final class MovieToolGui extends JFrame {
 
     // ------------------------------------------------------------- running
 
+    /**
+     * Null when the collected options carry enough input to run (a folder -
+     * or, for the multi-pass Shift card, at least one shift pass with paths).
+     */
+    static String inputProblem(Options options) {
+        if (options.getFolder() != null && !options.getFolder().trim().isEmpty()) return null;
+        if (!options.getShiftGroups().isEmpty()) return null;
+        return "Please choose a folder or file first.";
+    }
+
     private void runCurrent() {
         if (worker != null || current == null) return;
         final Options options = new Options();
@@ -317,8 +327,13 @@ public final class MovieToolGui extends JFrame {
             GuiUtil.error(this, "Invalid input: " + e.getMessage());
             return;
         }
-        if (options.getFolder().trim().isEmpty()) {
-            GuiUtil.error(this, "Please choose a folder or file first.");
+        String problem = inputProblem(options);
+        if (problem != null) {
+            // The Shift card works from shift passes, not the folder field -
+            // point its empty case at the hand-picked list instead.
+            GuiUtil.error(this, current instanceof Cards.ShiftCard
+                    ? "Add at least one file or folder to the hand-picked list first."
+                    : problem);
             return;
         }
         setBusy(true);

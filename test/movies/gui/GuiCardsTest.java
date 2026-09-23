@@ -22,6 +22,16 @@ import java.util.Set;
  */
 public class GuiCardsTest {
     public static void main(String[] args) throws Exception {
+        // Run-button validation: a folder OR shift passes must allow a run.
+        Options folderOnly = new Options();
+        folderOnly.setFolder("D:/subs/a.srt");
+        if (MovieToolGui.inputProblem(folderOnly) != null) throw new AssertionError("folder should pass inputProblem");
+        Options passes = new Options();
+        passes.addShiftGroup(2.5).paths.add("D:/subs/a.srt");
+        if (MovieToolGui.inputProblem(passes) != null) throw new AssertionError("shift passes should pass inputProblem");
+        Options noInput = new Options();
+        if (MovieToolGui.inputProblem(noInput) == null) throw new AssertionError("empty options should fail inputProblem");
+
         List<OpCard> cards = Cards.all();
         System.out.println("cards: " + cards.size());
         if (cards.size() < 10) throw new AssertionError("cards went missing: " + cards.size());
