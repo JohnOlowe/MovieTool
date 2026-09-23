@@ -58,9 +58,13 @@ public class AwafimConvention extends AbstractConvention {
             quality = qualityTokenValue(leadingQuality.group(1));
             withoutParens = withoutParens.substring(leadingQuality.end());
         }
-        String episodeTitle = trimSeparators(withoutParens);
+        // Trailing technical tokens are tags/quality/language, not the title:
+        // "Running Ahead.HDTV.x264-FLEET.en" keeps "Running Ahead" only.
+        TechTail tail = splitTechnicalTail(trimSeparators(withoutParens));
+        String episodeTitle = tail.title;
         if (episodeTitle.endsWith("-")) episodeTitle = episodeTitle.substring(0, episodeTitle.length() - 1).trim();
         if (title.isEmpty() || episodeTitle.isEmpty()) return null;
+        if (quality == 0) quality = tail.quality;
 
         // A previously imdb-renamed file parses as "Show - SxxExx - Title";
         // make sure no trailing separator sneaks into the show name.
@@ -69,6 +73,8 @@ public class AwafimConvention extends AbstractConvention {
         parts.setSeason(season);
         parts.setEpisode(episode);
         if (quality > 0) parts.setQuality(quality);
+        if (!tail.language.isEmpty()) parts.setLanguage(tail.language);
+        parts.getTags().addAll(tail.tags);
         parts.setEpisodeTitle(underscoresToSpaces(episodeTitle));
         for (String tag : groups) {
             if (tag.matches("\\d+")) continue; // duplicate download counter, not a tag

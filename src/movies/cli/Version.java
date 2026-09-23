@@ -3,7 +3,7 @@ package movies.cli;
 /** Single place for the tool version. */
 public final class Version {
 
-    public static final String TEXT = "2.4.5";
+    public static final String TEXT = "2.4.6";
 
     private Version() {
     }

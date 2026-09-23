@@ -63,7 +63,14 @@ final class HelpBook {
                 + "or to your own pattern. Auto-detection picks each file's site format and the "
                 + "target cleans it up; subtitles are renamed to match their video, which is what "
                 + "players expect. Plain host names like <font face=\"monospace\">Flash_S05E03.mp4</font> "
-                + "(Dood style) are fully understood: title <i>Flash</i>, season 5, episode 3.</p>");
+                + "(Dood style) are fully understood: title <i>Flash</i>, season 5, episode 3 - and "
+                + "<font face=\"monospace\">Show - 5x05 - Title.HDTV.x264-FLEET.en.mp4</font> style names "
+                + "parse just as cleanly (technical tags kept out of the title).</p>");
+        sb.append("<p><b>Your MVB format is built in:</b> pick <i>MVB (Moviebox + IMDB)</i> as the "
+                + "target (CLI: <font face=\"monospace\">-t mvb</font>) and files become "
+                + "<font face=\"monospace\">The Flash - S05E05 - Running Ahead.MVB.IMDB.en.mp4</font> "
+                + "(movies: <font face=\"monospace\">Se7en.MVB.IMDB.en.mp4</font>) - no custom pattern "
+                + "needed. Already-MVB-named files are recognised and left alone.</p>");
         sb.append("<p><b>Custom pattern tokens</b> (case-insensitive; leave out what you do not "
                 + "want - empty tokens and their spaces are cleaned up automatically):</p>"
                 + "<table cellpadding=\"3\">"

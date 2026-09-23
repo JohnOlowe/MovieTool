@@ -160,7 +160,10 @@ public final class MovieToolGui extends JFrame {
 
         JPanel cardHolder = new JPanel(new BorderLayout());
         cardHolder.setBorder(BorderFactory.createEmptyBorder(8, 4, 8, 8));
-        cardHolder.add(cardPanel, BorderLayout.NORTH);
+        // CENTER (not NORTH): the card area fills everything between the
+        // description and the results split, so the Help guide can be made
+        // as tall as the user wants by dragging the divider below it.
+        cardHolder.add(cardPanel, BorderLayout.CENTER);
 
         descriptionLabel.setForeground(new Color(90, 90, 90));
         descriptionLabel.setBorder(BorderFactory.createEmptyBorder(6, 10, 2, 10));

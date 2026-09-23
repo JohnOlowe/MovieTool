@@ -1,6 +1,7 @@
 package movies.core;
 
 import movies.core.conv.AwafimConvention;
+import movies.core.conv.MvbConvention;
 import movies.core.conv.FzmoviesConvention;
 import movies.core.conv.MovieboxConvention;
 import movies.core.conv.NkiriConvention;
@@ -29,6 +30,7 @@ public final class ConventionRegistry {
     private final Map<String, NamingConvention> conventions = new LinkedHashMap<String, NamingConvention>();
 
     public ConventionRegistry() {
+        register(new MvbConvention());
         register(new TvSubtitlesConvention());
         register(new AwafimConvention());
         register(new WaploadedConvention());

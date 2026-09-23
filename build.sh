@@ -71,7 +71,7 @@ find src -name '*.java' > build/sources.txt
 # ---------------------------------------------------------------------- pack
 echo "Manifest-Version: 1.0" > build/MANIFEST.MF
 echo "Implementation-Title: MovieTool" >> build/MANIFEST.MF
-echo "Implementation-Version: 2.4.5" >> build/MANIFEST.MF
+echo "Implementation-Version: 2.4.6" >> build/MANIFEST.MF
 echo "Main-Class: movies.Main" >> build/MANIFEST.MF
 echo "" >> build/MANIFEST.MF
 

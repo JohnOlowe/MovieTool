@@ -49,6 +49,16 @@ final class Cards {
         private final JPanel panel = new JPanel(new GridBagLayout());
         private int row;
 
+        Form() {
+            // Springy filler far below the real rows: when the card area is
+            // stretched (e.g. a tall Help guide), the form stays top-aligned.
+            GridBagConstraints filler = new GridBagConstraints();
+            filler.gridx = 0;
+            filler.gridy = 999;
+            filler.weighty = 1.0;
+            panel.add(new JPanel(), filler);
+        }
+
         JTextField addPathField(String label, boolean directory) {
             return addPathField(label, directory, null);
         }

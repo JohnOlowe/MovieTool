@@ -55,6 +55,8 @@ public final class SelfTest {
         testShiftMulti();
         testPatternTokens();
         testDoodNames();
+        testNxnnVideos();
+        testMvbConvention();
         testNamesFromSubs();
         testSanitizer();
         testRename();
@@ -963,6 +965,76 @@ public final class SelfTest {
                     && "The Flash - S05E03.srt".equals(action.to.getName())) subSelf = true;
         }
         check("rename-from-subs sub keeps own identity", subSelf);
+    }
+
+    private static void testNxnnVideos() {
+        ConventionRegistry registry = new ConventionRegistry();
+
+        // The user's exact video name (NxNN marker on an MP4).
+        FileNameParts mp4 = registry.detect("The Flash - 5x05 - Running Ahead.HDTV.x264-FLEET.en.mp4", registry.all());
+        check("nxnn mp4 detected", mp4 != null);
+        check("nxnn mp4 title", "The Flash".equals(mp4.getTitle()));
+        check("nxnn mp4 season", mp4.getSeason() == 5);
+        check("nxnn mp4 episode", mp4.getEpisode() == 5);
+        check("nxnn mp4 epTitle", "Running Ahead".equals(mp4.getEpisodeTitle()));
+        check("nxnn mp4 lang", "en".equals(mp4.getLanguage()));
+        check("nxnn mp4 tags", mp4.getTags().contains("HDTV") && mp4.getTags().contains("x264-FLEET"));
+
+        // SxxEyy on a video now takes the same clean path.
+        FileNameParts sxxeyy = registry.detect("The Flash - S05E05 - Running Ahead.HDTV.x264-FLEET.en.mp4", registry.all());
+        check("sxxeyy mp4 clean", sxxeyy != null && "Running Ahead".equals(sxxeyy.getEpisodeTitle())
+                && "en".equals(sxxeyy.getLanguage()));
+
+        // Two-segment SxxEyy names go through awafim - tail must still be cut.
+        FileNameParts awafim = registry.detect("The Flash S05E05 - Running Ahead.HDTV.x264-FLEET.en.mp4", registry.all());
+        check("awafim tail cut", awafim != null && "Running Ahead".equals(awafim.getEpisodeTitle())
+                && "en".equals(awafim.getLanguage()));
+
+        // Natural dotted words survive (regression guard).
+        FileNameParts pow = registry.detect("The Flash S07E16 - P.O.W.mp4", registry.all());
+        check("pow untouched", pow != null && "P.O.W".equals(pow.getEpisodeTitle()));
+
+        // Quality token in the tail lands in the quality field.
+        FileNameParts q = registry.detect("Show - 2x04 - Rebirth.720p.WEB.en.srt", registry.all());
+        check("tail quality", q != null && q.getQuality() == 720 && "Rebirth".equals(q.getEpisodeTitle()));
+    }
+
+    private static void testMvbConvention() {
+        ConventionRegistry registry = new ConventionRegistry();
+        movies.core.NamingConvention mvb = registry.get("mvb");
+        check("mvb registered", mvb != null);
+        check("mvb first for detection", registry.all().get(0).id().equals("mvb"));
+        check("mvb in id list", movies.core.ConventionRegistry.idList().contains("mvb"));
+
+        movies.core.FileNameParts parts = new movies.core.FileNameParts();
+        parts.setTitle("The Flash");
+        parts.setSeason(5);
+        parts.setEpisode(5);
+        parts.setEpisodeTitle("Running Ahead");
+        parts.setExtension(".mp4");
+        check("mvb build episode", "The Flash - S05E05 - Running Ahead.MVB.IMDB.en.mp4".equals(mvb.build(parts)));
+
+        parts.setLanguage("es");
+        check("mvb build lang", "The Flash - S05E05 - Running Ahead.MVB.IMDB.es.mp4".equals(mvb.build(parts)));
+        parts.setLanguage("");
+        parts.setSeason(0);
+        parts.setEpisode(0);
+        parts.setEpisodeTitle("");
+        parts.setTitle("Se7en");
+        check("mvb build movie", "Se7en.MVB.IMDB.en.mp4".equals(mvb.build(parts)));
+
+        // Round trip + NxNN input + technical tail inside the MVB name.
+        movies.core.FileNameParts ep = registry.detect("The Flash - S05E05 - Running Ahead.MVB.IMDB.en.mp4", registry.all());
+        check("mvb parse episode", ep != null && "mvb".equals(ep.getConvention())
+                && ep.getSeason() == 5 && ep.getEpisode() == 5
+                && "The Flash".equals(ep.getTitle()) && "Running Ahead".equals(ep.getEpisodeTitle()));
+        movies.core.FileNameParts nx = registry.detect("The Flash - 5x05 - Running Ahead.MVB.IMDB.en.mp4", registry.all());
+        check("mvb parse nxnn", nx != null && nx.getSeason() == 5 && nx.getEpisode() == 5);
+        movies.core.FileNameParts tech = registry.detect("The Flash - S05E05 - Running Ahead.HDTV.x264.MVB.IMDB.en.mp4", registry.all());
+        check("mvb parse tail", tech != null && "Running Ahead".equals(tech.getEpisodeTitle())
+                && tech.getTags().contains("HDTV"));
+        movies.core.FileNameParts movie = registry.detect("Se7en (1995).MVB.IMDB.en.mp4", registry.all());
+        check("mvb parse movie", movie != null && "Se7en".equals(movie.getTitle()) && movie.getYear() == 1995);
     }
 
     private static void testFlatten() throws IOException {
