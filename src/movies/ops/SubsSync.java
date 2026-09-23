@@ -103,6 +103,8 @@ public class SubsSync {
         List<File> subFiles = new ArrayList<File>();
         collectInto(subsRoot, true, subFiles, false);
         Map<String, String> claimedTargets = new HashMap<String, String>();
+        Set<String> renamedVideos = new HashSet<String>();
+        int videoRenames = 0;
         List<TransferAction> transfers = new ArrayList<TransferAction>();
         Set<String> usedVideos = new HashSet<String>();
 
@@ -113,9 +115,33 @@ public class SubsSync {
                 problems.add(Problem.warn("No matching video for: " + describe(sub, subsRoot)));
                 continue;
             }
-            String targetName = IoUtil.baseName(best.file.getName()) + subtitleExtensionFor(sub);
+            // Pair name: the video's by default, or the SUBTITLE's when the
+            // user asked for it - then the video is renamed to match so the
+            // pair stays together under the (usually richer) subtitle name.
+            String pairBase = options.isNameFromSubs()
+                    ? IoUtil.baseName(sub.getName())
+                    : IoUtil.baseName(best.file.getName());
+            String targetName = pairBase + subtitleExtensionFor(sub);
             File target = new File(best.file.getParentFile(), targetName);
             String targetPath = target.getAbsolutePath();
+
+            if (options.isNameFromSubs() && !renamedVideos.contains(best.file.getAbsolutePath())) {
+                File videoTarget = new File(best.file.getParentFile(),
+                        pairBase + IoUtil.extensionOf(best.file.getName()));
+                if (!sameFile(videoTarget, best.file)) {
+                    if (videoTarget.exists()) {
+                        problems.add(Problem.warn("Video keeps its name (target exists): "
+                                + videoTarget.getName()));
+                    } else {
+                        TransferAction videoRename = new TransferAction(TransferAction.Kind.MOVE,
+                                best.file, videoTarget);
+                        videoRename.renamesVideo = true;
+                        transfers.add(videoRename);
+                        renamedVideos.add(best.file.getAbsolutePath());
+                        videoRenames++;
+                    }
+                }
+            }
 
             if (target.equals(sub) || sameFile(target, sub)) {
                 transfers.add(wrap(options, sub, target, TransferAction.State.ALREADY_THERE));
@@ -156,7 +182,9 @@ public class SubsSync {
             if (transfer.state != TransferAction.State.PLANNED) continue;
             try {
                 IoUtil.mkdirs(transfer.to.getParentFile());
-                if (options.isMove()) {
+                // Explicit MOVE actions (video renamed to the subtitle name)
+                // always move; subtitle actions follow the user's choice.
+                if (options.isMove() || transfer.kind == TransferAction.Kind.MOVE) {
                     java.nio.file.Files.move(transfer.from.toPath(), transfer.to.toPath(),
                             java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 } else {
@@ -277,7 +305,9 @@ public class SubsSync {
         int done = 0;
         int skipped = 0;
         int problems = 0;
+        int videoRenames = 0;
         for (TransferAction t : transfers) {
+            if (t.renamesVideo) { videoRenames++; continue; }
             switch (t.state) {
                 case PLANNED: planned++; break;
                 case DONE: done++; break;
@@ -287,11 +317,12 @@ public class SubsSync {
             }
         }
         StringBuilder sb = new StringBuilder();
-        sb.append(transfers.size()).append(" subtitle(s): ");
+        sb.append(transfers.size() - videoRenames).append(" subtitle(s): ");
         if (planned > 0) sb.append(planned).append(" planned, ");
         if (done > 0) sb.append(done).append(" done, ");
         if (skipped > 0) sb.append(skipped).append(" already in place/skipped, ");
         if (problems > 0) sb.append(problems).append(" conflicts, ");
+        if (videoRenames > 0) sb.append(videoRenames).append(" video(s) renamed to subtitle names, ");
         return sb.toString().replaceAll(", $", "");
     }
 

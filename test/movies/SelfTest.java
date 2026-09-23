@@ -54,6 +54,8 @@ public final class SelfTest {
         testShiftBatch();
         testShiftMulti();
         testPatternTokens();
+        testDoodNames();
+        testNamesFromSubs();
         testSanitizer();
         testRename();
         testImdbRename();
@@ -882,6 +884,85 @@ public final class SelfTest {
         // Empty request errors clearly.
         Options empty = new Options();
         check("multi empty errors", new SubsShift().shift(empty).errorCount() == 1);
+    }
+
+    private static void testDoodNames() {
+        ConventionRegistry registry = new ConventionRegistry();
+        FileNameParts dood = registry.detect("Flash_S05E03.mp4", registry.all());
+        check("dood detected", dood != null);
+        check("dood title", "Flash".equals(dood.getTitle()));
+        check("dood season", dood.getSeason() == 5);
+        check("dood episode", dood.getEpisode() == 3);
+        check("dood isEpisode", dood.isEpisode());
+
+        FileNameParts the = registry.detect("The_Flash_S05E04.mp4", registry.all());
+        check("dood the title", "The Flash".equals(the.getTitle()));
+        check("dood the episode", the.getSeason() == 5 && the.getEpisode() == 4);
+
+        FileNameParts dotted = registry.detect("The.Flash.S05E04.720p.mp4", registry.all());
+        check("dood dotted episode", dotted != null && dotted.getSeason() == 5 && dotted.getEpisode() == 4);
+        check("dood dotted quality", dotted != null && dotted.getQuality() == 720);
+
+        FileNameParts plain = registry.detect("Se7en_2009.mp4", registry.all());
+        check("dood plain untouched", plain != null && "Se7en 2009".equals(plain.getTitle()) && !plain.isEpisode());
+
+        check("dood pattern build", "Flash - S05E03.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} - {s01e01}{ext}", dood)));
+        check("dood regular build keeps episode", "Flash S05E03.mp4".equals(
+                new movies.core.conv.RegularConvention().build(dood)));
+    }
+
+    private static void testNamesFromSubs() throws IOException {
+        // --- Sync: the subtitle's name names the pair, the video follows.
+        File dir = tempDir("names-from-subs");
+        File video = touch(dir, "Flash_S05E03.mp4");
+        IoUtil.writeText(video, "");
+        File subs = mkdir(dir, "Subtitles");
+        File sub = touch(subs, "The.Flash.S05E03.720p.English.srt");
+        IoUtil.writeText(sub, "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
+
+        Options options = options(dir.getAbsolutePath());
+        options.setSecondaryFolder(subs.getAbsolutePath());
+        options.setNameFromSubs(true);
+        SubsSync sync = new SubsSync();
+        OperationResult plan = sync.plan(options);
+        check("sync-from-subs plans", plan.errorCount() == 0);
+        check("sync-from-subs video rename planned", plan.getTransfers().size() == 2);
+        boolean videoMove = false;
+        for (TransferAction t : plan.getTransfers()) {
+            if (t.renamesVideo && "The.Flash.S05E03.720p.English.mp4".equals(t.to.getName())) videoMove = true;
+        }
+        check("sync-from-subs video follows sub name", videoMove);
+        sync.apply(plan, options);
+        check("sync-from-subs video renamed", new File(dir, "The.Flash.S05E03.720p.English.mp4").exists());
+        check("sync-from-subs sub placed", new File(dir, "The.Flash.S05E03.720p.English.srt").exists());
+        check("sync-from-subs old video gone", !new File(dir, "Flash_S05E03.mp4").exists());
+
+        // --- Rename: an unparseable video borrows its episode subtitle's name.
+        File dir2 = tempDir("names-from-subs-rename");
+        File bare = touch(dir2, "S05E03.mp4");
+        IoUtil.writeText(bare, "");
+        File good = touch(dir2, "The Flash S05E03.srt");
+        IoUtil.writeText(good, "");
+
+        Options rename = options(dir2.getAbsolutePath());
+        rename.setNameFromSubs(true);
+        rename.setPattern("{title} - {s01e01}{ext}");
+        RenameEngine engine = new RenameEngine();
+        RenameEngine.RenamePlan plan2 = engine.plan(rename, null);
+        boolean borrowed = false;
+        for (RenameEngine.RenameAction action : plan2.actions()) {
+            if ("S05E03.mp4".equals(action.from.getName())
+                    && "The Flash - S05E03.mp4".equals(action.to.getName())) borrowed = true;
+        }
+        check("rename-from-subs borrow", borrowed);
+        // The subtitle must follow its OWN parts (not borrow from the video).
+        boolean subSelf = false;
+        for (RenameEngine.RenameAction action : plan2.actions()) {
+            if ("The Flash S05E03.srt".equals(action.from.getName())
+                    && "The Flash - S05E03.srt".equals(action.to.getName())) subSelf = true;
+        }
+        check("rename-from-subs sub keeps own identity", subSelf);
     }
 
     private static void testFlatten() throws IOException {

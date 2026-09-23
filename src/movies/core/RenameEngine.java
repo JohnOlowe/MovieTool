@@ -77,10 +77,42 @@ public class RenameEngine {
         List<File> files = new ArrayList<File>();
         collect(root, options.isRecursive(), files, 0);
 
+        // Parse everything up front. When the user asked for subtitle names,
+        // a video that cannot be parsed on its own borrows the parts of an
+        // episode-matched subtitle - so "S05E03.mp4" can become
+        // "The Flash S05E03.mp4" thanks to its subtitle.
+        Map<File, FileNameParts> parsedByName = new java.util.LinkedHashMap<File, FileNameParts>();
+        for (File file : files) {
+            if (file.isDirectory()) continue;
+            parsedByName.put(file, registry.detect(file.getName(), selected));
+        }
+        if (options.isNameFromSubs()) {
+            Map<String, FileNameParts> subPartsByEpisode = new HashMap<String, FileNameParts>();
+            for (Map.Entry<File, FileNameParts> entry : parsedByName.entrySet()) {
+                FileNameParts parts = entry.getValue();
+                if (parts != null && parts.isEpisode() && !isVideoFile(entry.getKey().getName())) {
+                    subPartsByEpisode.put(parts.getSeason() + "x" + parts.getEpisode(), parts);
+                }
+            }
+            for (Map.Entry<File, FileNameParts> entry : parsedByName.entrySet()) {
+                if (entry.getValue() != null || !isVideoFile(entry.getKey().getName())) continue;
+                int[] raw = NameResolver.rawEpisode(entry.getKey().getName());
+                if (raw == null) continue;
+                FileNameParts donor = subPartsByEpisode.get(raw[0] + "x" + raw[1]);
+                if (donor == null) continue;
+                FileNameParts copy = new FileNameParts(donor);
+                copy.setExtension(extensionOf(entry.getKey().getName()));
+                copy.setOriginalName(entry.getKey().getName());
+                parsedByName.put(entry.getKey(), copy);
+                problems.add(Problem.info("Named from subtitle: " + entry.getKey().getName()
+                        + " takes its name from " + donor.getOriginalName()));
+            }
+        }
+
         Map<String, String> plannedTargets = new HashMap<String, String>();
         for (File file : files) {
             if (file.isDirectory()) continue;
-            FileNameParts parsed = registry.detect(file.getName(), selected);
+            FileNameParts parsed = parsedByName.get(file);
             if (parsed == null) {
                 problems.add(Problem.warn("Unrecognised name, skipped: " + file.getName()));
                 continue;
@@ -133,6 +165,23 @@ public class RenameEngine {
         if (recursive && depth < 16) {
             for (File dir : dirs) collect(dir, recursive, into, depth + 1);
         }
+    }
+
+    private static final String[] VIDEO_EXTENSIONS = {
+            ".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts"
+    };
+
+    private static boolean isVideoFile(String name) {
+        String ext = extensionOf(name);
+        for (String candidate : VIDEO_EXTENSIONS) {
+            if (candidate.equals(ext)) return true;
+        }
+        return false;
+    }
+
+    private static String extensionOf(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot <= 0 ? "" : name.substring(dot).toLowerCase(java.util.Locale.ROOT);
     }
 
     public static boolean isMediaFile(String name) {

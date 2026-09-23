@@ -18,6 +18,8 @@ public class TransferAction {
     public final File to;
     public State state = State.PLANNED;
     public String note = "";
+    /** True when this action renames the VIDEO to the subtitle's name. */
+    public boolean renamesVideo;
 
     public TransferAction(Kind kind, File from, File to) {
         this.kind = kind;

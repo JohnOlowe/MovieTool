@@ -20,6 +20,10 @@ public class AwafimConvention extends AbstractConvention {
 
     private static final Pattern SE = Pattern.compile("(?i)(?:^|[\\s.\\-_])s(\\d{1,2})e(\\d{1,3})(?:[\\s.\\-_]|$)");
 
+    /** A quality token leading the text after the episode marker: ".720p", " 1080P". */
+    private static final Pattern LEADING_QUALITY =
+            Pattern.compile("(?i)^\\s*[._\\-\\s]*(\\d{3,4}p)(?![a-z0-9])");
+
     @Override
     public String id() { return "awafim"; }
 
@@ -40,13 +44,20 @@ public class AwafimConvention extends AbstractConvention {
         if (!m.find()) return null;
         int season = Integer.parseInt(m.group(1));
         int episode = Integer.parseInt(m.group(2));
+        int quality = 0;
 
         String title = trimSeparators(stem.substring(0, m.start()));
         String rest = stem.substring(m.end());
 
-        // Everything after the marker: an episode title, optional "(Site)" and "(n)".
+        // Everything after the marker: optional quality, an episode title,
+        // optional "(Site)" and "(n)".
         List<String> groups = extractParenthesised(rest);
         String withoutParens = stripParenthesised(rest);
+        Matcher leadingQuality = LEADING_QUALITY.matcher(withoutParens);
+        if (leadingQuality.lookingAt()) {
+            quality = qualityTokenValue(leadingQuality.group(1));
+            withoutParens = withoutParens.substring(leadingQuality.end());
+        }
         String episodeTitle = trimSeparators(withoutParens);
         if (episodeTitle.endsWith("-")) episodeTitle = episodeTitle.substring(0, episodeTitle.length() - 1).trim();
         if (title.isEmpty() || episodeTitle.isEmpty()) return null;
@@ -57,6 +68,7 @@ public class AwafimConvention extends AbstractConvention {
         parts.setTitle(title);
         parts.setSeason(season);
         parts.setEpisode(episode);
+        if (quality > 0) parts.setQuality(quality);
         parts.setEpisodeTitle(underscoresToSpaces(episodeTitle));
         for (String tag : groups) {
             if (tag.matches("\\d+")) continue; // duplicate download counter, not a tag

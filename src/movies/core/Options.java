@@ -57,6 +57,9 @@ public class Options {
     /** Follow sub-folders when scanning. */
     private boolean recursive;
 
+    /** When true, the SUBTITLE's name drives the pair name (sync/rename). */
+    private boolean nameFromSubs;
+
     /** Report what would happen without touching anything (rename/sync/flatten). */
     private boolean dryRun = true;
 
@@ -170,6 +173,12 @@ public class Options {
 
     public boolean isBackup() { return backup; }
     public void setBackup(boolean backup) { this.backup = backup; }
+
+    /** True when pair names should come from the subtitles, not the videos. */
+    public boolean isNameFromSubs() { return nameFromSubs; }
+
+    /** Chooses subtitle names (true) or video names (default, false) as the pair name source. */
+    public void setNameFromSubs(boolean nameFromSubs) { this.nameFromSubs = nameFromSubs; }
 
     public double getShiftSeconds() { return shiftSeconds; }
     public void setShiftSeconds(double shiftSeconds) { this.shiftSeconds = shiftSeconds; }

@@ -145,6 +145,7 @@ final class Cards {
         private final JTextField pattern = form.addTextField("Or custom pattern:", "{title} {s01e01}{ext} - tokens in Help");
         private final JTextField conventions = form.addTextField("Only detect:", "e.g. moviebox,awafim (blank = all)");
         private final JCheckBox recursive = form.addCheckbox("Include sub-folders", false);
+        private final JCheckBox nameFromSubs = form.addCheckbox("Nameless videos take the name of their episode's subtitle", false);
         private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
         private final ConventionRegistry registry = new ConventionRegistry();
         private final RenameEngine engine = new RenameEngine();
@@ -168,6 +169,7 @@ final class Cards {
         public void collect(Options options) {
             options.setFolder(dir.getText().trim());
             options.setRecursive(recursive.isSelected());
+            options.setNameFromSubs(nameFromSubs.isSelected());
             options.setDryRun(dryRun.isSelected());
             options.setPattern(pattern.getText().trim());
             options.setConventions(conventions.getText().trim());
@@ -314,12 +316,13 @@ final class Cards {
         private final JCheckBox recursive = form.addCheckbox("Scan sub-folders", true);
         private final JCheckBox move = form.addCheckbox("Move instead of copy", false);
         private final JCheckBox overwrite = form.addCheckbox("Overwrite existing subtitles", false);
+        private final JCheckBox nameFromSubs = form.addCheckbox("Name pairs from the SUBTITLES (video follows)", false);
         private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
         private final SubsSync sync = new SubsSync();
         private volatile OperationResult lastResult;
 
         SyncCard() {
-            super("Sync subtitles", "Match subtitles to their videos and put them next to each video, named like the video.");
+            super("Sync subtitles", "Match subtitles to their videos and put them next to each video. By default the video's name wins; tick the subtitles option to let the (usually richer) subtitle name name the pair - the video is renamed to match.");
             subs.setText("");
         }
 
@@ -335,6 +338,7 @@ final class Cards {
             options.setRecursive(recursive.isSelected());
             options.setMove(move.isSelected());
             options.setOverwrite(overwrite.isSelected());
+            options.setNameFromSubs(nameFromSubs.isSelected());
             options.setDryRun(dryRun.isSelected());
         }
 

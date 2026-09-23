@@ -62,7 +62,8 @@ final class HelpBook {
         sb.append("<h4>Rename</h4><p>Renames videos <i>and</i> subtitles to one clean convention "
                 + "or to your own pattern. Auto-detection picks each file's site format and the "
                 + "target cleans it up; subtitles are renamed to match their video, which is what "
-                + "players expect.</p>");
+                + "players expect. Plain host names like <font face=\"monospace\">Flash_S05E03.mp4</font> "
+                + "(Dood style) are fully understood: title <i>Flash</i>, season 5, episode 3.</p>");
         sb.append("<p><b>Custom pattern tokens</b> (case-insensitive; leave out what you do not "
                 + "want - empty tokens and their spaces are cleaned up automatically):</p>"
                 + "<table cellpadding=\"3\">"
@@ -109,9 +110,13 @@ final class HelpBook {
     private static void sync(StringBuilder sb) {
         sb.append("<h4>Sync subtitles</h4><p>The classic job: matches subtitle files to their videos "
                 + "(episode-aware, across different naming conventions) and puts each subtitle next to "
-                + "its video, named exactly like the video. Subtitles inside per-episode folders or the "
-                + "Subtitles folder are found too. Copy or move; a second subtitle for the same video is "
-                + "disambiguated by language.</p>");
+                + "its video. Subtitles inside per-episode folders or the Subtitles folder are found "
+                + "too. Copy or move; a second subtitle for the same video is disambiguated by "
+                + "language.</p><p><b>Who names the pair:</b> by default the video's name wins. Tick "
+                + "'Name pairs from the SUBTITLES' (CLI: <font face=\"monospace\">--names-from subs</font>) "
+                + "when your subtitles carry the better names - the video is then renamed to the "
+                + "subtitle's name too, so both files of the pair end up identical apart from the "
+                + "extension.</p>");
     }
 
     private static void collect(StringBuilder sb) {

@@ -165,6 +165,7 @@ public final class Cli {
         options.setMove(args.flag("move"));
         options.setCsv(args.flag("csv"));
         options.setConventions(args.joined("conventions"));
+        options.setNameFromSubs("subs".equalsIgnoreCase(args.value("names-from", "video")));
         options.setPattern(args.value("pattern", ""));
         options.setOutput(args.value("out", ""));
         if (args.flag("verbose")) options.setVerbosity(2);
@@ -217,6 +218,8 @@ public final class Cli {
                     + "                           {quality} {language} {ext} {original}\n"
                     + "  -c, --conventions <ids>  Restrict auto-detection, e.g. moviebox,awafim\n"
                     + "  -r, --recursive          Include sub-folders\n"
+                    + "      --names-from subs    A video with no parsable name takes the name of its\n"
+                    + "                           episode's subtitle (matched by SxxEyy)\n"
                     + "      --apply              Really rename (default is a dry run)\n"
                     + "  -v, --verbose            Show every planned rename\n"
                     + "  -q, --quiet              Only errors\n";
@@ -476,6 +479,8 @@ public final class Cli {
             return "Usage: movietool sync-subs -d <videos-folder> [-s <subs-folder>] [options]\n"
                     + "\nMatches subtitles to videos (episode aware, any conventions) and copies\n"
                     + "each subtitle next to its video named exactly like the video. Dry-run by default.\n"
+                    + "      --names-from subs     Name each pair after the SUBTITLE and rename the\n"
+                    + "                            video to match (default: video's name wins)\n"
                     + "  -d, --dir <folder>       Videos folder\n"
                     + "  -s, --subs <folder>      Subtitles folder (default: 'Subtitles' inside\n"
                     + "                           --dir when present, else --dir itself)\n"
@@ -827,6 +832,7 @@ public final class Cli {
         aliases.put("verbose", "--verbose,-v");
         aliases.put("quiet", "--quiet,-q");
         aliases.put("backup", "--backup");
+        aliases.put("names-from", "--names-from");
         aliases.put("no-backup", "--no-backup");
         return aliases;
     }

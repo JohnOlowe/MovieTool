@@ -113,10 +113,10 @@ Every command that writes to your library is a **dry run by default** — add
 `--apply` (`-a`) to execute. Global options: `-v/--verbose`, `-q/--quiet`.
 
 ```
-movietool rename -d <folder> -t <convention> [-r] [-c ids] [--pattern p] [--apply]
+movietool rename -d <folder> -t <convention> | --pattern p [-r] [--names-from subs] [--apply]
 movietool imdb-rename -d <folder> [--titles <file>] [-s <subs>] [--show name] [--style s01e01|1x01]
                      [--tag MVB.IMDB.en | --no-tag] [--replace-with c] [-r] [--overwrite] [--apply]
-movietool sync-subs -d <videos-folder> [-s <subs-folder>] [-r] [--move] [--overwrite] [--apply]
+movietool sync-subs -d <videos-folder> [-s <subs-folder>] [-r] [--move] [--names-from subs] [--overwrite] [--apply]
 movietool relocate-subs -d <folder> [-r] [--overwrite] [--apply]
 movietool clean-titles (-f <file> | -d <folder>) [-o out] [--replace] [--no-sort] [--apply]
 movietool download-subs -d <folder> [-r] [--lang en] [--api-key k] [--into-subs-folder] [--apply]
