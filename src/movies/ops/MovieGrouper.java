@@ -18,19 +18,22 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 /**
  * Groups a flat library into one folder per movie/episode: the movie's videos
  * (EVERY quality variant of it), plus its subtitles - renamed to match the
- * video they belong to. This restores the original tool's "movie per folder"
- * behaviour on top of the current conventions and episode-aware matching.
+ * video they belong to.
  *
- * <p>Grouping key: the parsed title + season/episode, so "Movie 720P" and
- * "Movie 1080P" land together, while different episodes get their own
- * folders. Subtitles are matched with the same tier logic as the subtitle
- * sync, so per-episode folders on the subtitle side are handled too.</p>
+ * <p>With a target convention (CLI {@code -t}, GUI dropdown) the videos are
+ * ALSO renamed while they move, and the subtitles follow the video's NEW
+ * name. Nameless videos can borrow the name of their episode's subtitle
+ * ({@code --names-from subs}). Quality variants are kept distinct: the first
+ * video of a group gets the clean name, the others keep quality/tag
+ * markers. Matching prefers a video sitting in the SAME folder as the
+ * subtitle, so already-grouped material is handled correctly on re-runs.</p>
  */
 public class MovieGrouper {
 
@@ -39,8 +42,13 @@ public class MovieGrouper {
 
     private final ConventionRegistry registry = new ConventionRegistry();
 
-    /** Builds the move plan without touching the disk. */
-    public OperationResult plan(Options options) {
+    /**
+     * Builds the move/rename plan without touching the disk.
+     *
+     * @param targetConventionId convention to rename files towards, or
+     *                           null/blank to keep current names
+     */
+    public OperationResult plan(Options options, String targetConventionId) {
         OperationResult result = new OperationResult();
         File root = new File(options.getFolder());
         if (!root.isDirectory()) {
@@ -48,21 +56,57 @@ public class MovieGrouper {
             return result;
         }
         List<NamingConvention> selected = registry.selected(options.getConventions());
+        NamingConvention target = null;
+        if (targetConventionId != null && !targetConventionId.trim().isEmpty()) {
+            target = registry.get(targetConventionId.trim());
+            if (target == null) {
+                result.add(Problem.error("Unknown target convention: " + targetConventionId
+                        + " (see 'movietool conventions')"));
+                return result;
+            }
+        }
 
-        // ---- index videos and group them by movie/episode key.
+        // ---- subtitles first: their parsed parts feed the borrow pool.
+        List<File> subs = new ArrayList<File>();
+        collect(root, true, subs, SUBTITLE_EXTENSIONS);
+        Map<File, FileNameParts> partsBySub = new HashMap<File, FileNameParts>();
+        Map<String, FileNameParts> subDonors = new HashMap<String, FileNameParts>();
+        for (File sub : subs) {
+            FileNameParts parts = NameResolver.resolve(sub, registry, selected);
+            partsBySub.put(sub, parts);
+            if (parts != null && parts.isEpisode()) {
+                subDonors.put(parts.getSeason() + "x" + parts.getEpisode(), parts);
+            }
+        }
+
+        // ---- index ALL videos under the root (always recursive: matching
+        // needs the full picture, and already-grouped folders must be seen).
         List<File> videos = new ArrayList<File>();
-        collect(root, options.isRecursive(), videos, VIDEO_EXTENSIONS);
+        collect(root, true, videos, VIDEO_EXTENSIONS);
         if (videos.isEmpty()) {
             result.add(Problem.warn("No video files found under " + root.getPath()));
             result.setReport("Nothing to group");
             return result;
         }
         Map<File, FileNameParts> partsByVideo = new HashMap<File, FileNameParts>();
-        Map<String, List<File>> videosByKey = new LinkedHashMap<String, List<File>>();
         for (File video : videos) {
             FileNameParts parts = NameResolver.resolve(video, registry, selected);
+            if (parts == null && options.isNameFromSubs()) {
+                int[] raw = NameResolver.rawEpisode(video.getName());
+                FileNameParts donor = raw == null ? null : subDonors.get(raw[0] + "x" + raw[1]);
+                if (donor != null) {
+                    parts = new FileNameParts(donor);
+                    parts.setExtension(extensionOf(video.getName()));
+                    parts.setOriginalName(video.getName());
+                    result.add(Problem.info("Named from subtitle: " + video.getName()
+                            + " takes its name from " + donor.getOriginalName()));
+                }
+            }
             partsByVideo.put(video, parts);
-            String key = groupKey(video, parts);
+        }
+        Map<String, List<File>> videosByKey = new LinkedHashMap<String, List<File>>();
+        for (File video : videos) {
+            String key = groupKey(video, partsByVideo.get(video));
             List<File> group = videosByKey.get(key);
             if (group == null) {
                 group = new ArrayList<File>();
@@ -75,33 +119,60 @@ public class MovieGrouper {
         Map<String, String> folderNameByKey = new LinkedHashMap<String, String>();
         Set<String> usedNames = new HashSet<String>();
         for (Map.Entry<String, List<File>> entry : videosByKey.entrySet()) {
-            String name = folderName(entry.getValue().get(0), partsByVideo.get(entry.getValue().get(0)));
+            File first = entry.getValue().get(0);
+            String name = folderName(first, partsByVideo.get(first));
             String base = name;
-            for (int i = 2; usedNames.contains(name.toLowerCase()); i++) {
+            for (int i = 2; usedNames.contains(name.toLowerCase(Locale.ROOT)); i++) {
                 name = base + " (" + i + ")";
             }
-            usedNames.add(name.toLowerCase());
+            usedNames.add(name.toLowerCase(Locale.ROOT));
             folderNameByKey.put(entry.getKey(), name);
         }
 
-        // ---- plan the video moves and remember where each video ends up.
+        // ---- plan video moves (and optional renames).
         List<TransferAction> transfers = new ArrayList<TransferAction>();
         Map<File, File> homeByVideo = new HashMap<File, File>();
+        Map<File, String> baseByVideo = new HashMap<File, String>();
         int videosMoved = 0;
         for (Map.Entry<String, List<File>> entry : videosByKey.entrySet()) {
             File dir = new File(root, folderNameByKey.get(entry.getKey()));
+            Set<String> usedBases = new HashSet<String>();
             for (File video : entry.getValue()) {
-                File target = new File(dir, video.getName());
+                FileNameParts parts = partsByVideo.get(video);
+                // Full target file name: the convention builds name AND
+                // extension; keep-mode reuses the current name.
+                String newName = video.getName();
+                if (target != null && parts != null) {
+                    String built = NameSanitizer.sanitize(target.build(parts), options.getReplaceWith());
+                    if (!built.isEmpty()) newName = built;
+                }
+                String newBase = IoUtil.baseName(newName);
+                String newExt = newName.substring(newBase.length());
+                if (newExt.isEmpty()) newExt = extensionOf(video.getName());
+                // Keep quality variants distinct within the group.
+                if (!usedBases.add(newBase)) {
+                    String suffix = parts != null && parts.getQuality() > 0 ? " " + parts.getQuality() + "P"
+                            : parts != null && !parts.getTags().isEmpty() ? " " + joinTags(parts.getTags()) : "";
+                    String candidate = newBase + suffix;
+                    for (int i = 2; usedBases.contains(candidate); i++) {
+                        candidate = newBase + suffix + " (" + i + ")";
+                    }
+                    newBase = candidate;
+                    usedBases.add(newBase);
+                }
+                baseByVideo.put(video, newBase);
+
+                File targetFile = new File(dir, newBase + newExt);
                 File home;
-                if (sameDir(video, dir)) {
-                    transfers.add(wrap(video, target, TransferAction.State.ALREADY_THERE));
+                if (sameDir(video, dir) && video.getName().equals(targetFile.getName())) {
+                    transfers.add(wrap(video, targetFile, TransferAction.State.ALREADY_THERE));
                     home = video.getParentFile();
-                } else if (target.exists() && !options.isOverwrite()) {
-                    transfers.add(wrap(video, target, TransferAction.State.SKIPPED_EXISTS));
+                } else if (targetFile.exists() && !targetFile.equals(video) && !options.isOverwrite()) {
+                    transfers.add(wrap(video, targetFile, TransferAction.State.SKIPPED_EXISTS));
                     home = video.getParentFile(); // stays where it is
-                    result.add(Problem.warn("Video keeps its place (target exists): " + target.getPath()));
+                    result.add(Problem.warn("Video keeps its place (target exists): " + targetFile.getPath()));
                 } else {
-                    transfers.add(wrap(video, target, TransferAction.State.PLANNED));
+                    transfers.add(wrap(video, targetFile, TransferAction.State.PLANNED));
                     videosMoved++;
                     home = dir;
                 }
@@ -109,10 +180,8 @@ public class MovieGrouper {
             }
         }
 
-        // ---- match every subtitle (recursive: per-episode folders happen)
-        // and move it next to its video, renamed like the video.
-        List<File> subs = new ArrayList<File>();
-        collect(root, true, subs, SUBTITLE_EXTENSIONS);
+        // ---- match every subtitle and move it next to its video, renamed
+        // like the video's FINAL name (kept or convention-renamed).
         Set<String> taken = new HashSet<String>();
         for (TransferAction t : transfers) taken.add(t.to.getAbsolutePath());
         int subsMoved = 0;
@@ -126,33 +195,33 @@ public class MovieGrouper {
                 continue;
             }
             File dir = homeByVideo.get(video);
-            String name = IoUtil.baseName(video.getName()) + subtitleExtensionFor(sub);
-            File target = new File(dir, name);
-            if (taken.contains(target.getAbsolutePath())) {
-                // A second subtitle for the same video: disambiguate by counter.
+            String name = baseByVideo.get(video) + subtitleExtensionFor(sub);
+            File targetFile = new File(dir, name);
+            if (taken.contains(targetFile.getAbsolutePath())) {
                 String base = IoUtil.baseName(name);
                 String ext = name.substring(base.length());
                 for (int i = 2; i < 100; i++) {
                     File candidate = new File(dir, base + " (" + i + ")" + ext);
-                    if (!taken.contains(candidate.getAbsolutePath())) { target = candidate; break; }
+                    if (!taken.contains(candidate.getAbsolutePath())) { targetFile = candidate; break; }
                 }
             }
-            if (sameFile(sub, target)) {
-                transfers.add(wrap(sub, target, TransferAction.State.ALREADY_THERE));
-            } else if (target.exists() && !options.isOverwrite()) {
-                transfers.add(wrap(sub, target, TransferAction.State.SKIPPED_EXISTS));
-                result.add(Problem.warn("Subtitle keeps its place (target exists): " + target.getPath()));
+            if (sameFile(sub, targetFile)) {
+                transfers.add(wrap(sub, targetFile, TransferAction.State.ALREADY_THERE));
+            } else if (targetFile.exists() && !options.isOverwrite()) {
+                transfers.add(wrap(sub, targetFile, TransferAction.State.SKIPPED_EXISTS));
+                result.add(Problem.warn("Subtitle keeps its place (target exists): " + targetFile.getPath()));
             } else {
-                transfers.add(wrap(sub, target, TransferAction.State.PLANNED));
+                transfers.add(wrap(sub, targetFile, TransferAction.State.PLANNED));
                 subsMoved++;
             }
-            taken.add(target.getAbsolutePath());
+            taken.add(targetFile.getAbsolutePath());
         }
 
         int folderCount = homesOf(videos, homeByVideo).size();
         result.setTransfers(transfers);
         result.setReport(folderCount + " movie folder(s) for " + videos.size() + " video(s): "
                 + videosMoved + " video(s) and " + subsMoved + " subtitle(s) to move"
+                + (target != null ? " (renamed to " + target.id() + ")" : "")
                 + (unmatched > 0 ? ", " + unmatched + " subtitle(s) unmatched" : ""));
         return result;
     }
@@ -176,18 +245,21 @@ public class MovieGrouper {
 
     // ------------------------------------------------------------ helpers
 
-    /** First try the subtitle's own parsed group key, so it joins its movie even among quality variants. */
+    /**
+     * Picks the video of a subtitle from its parsed group, preferring a video
+     * in the SAME folder as the subtitle (already-grouped material), then an
+     * identical normalised name, then the group's first video.
+     */
     private File videoByKey(File sub, Map<String, List<File>> videosByKey, List<File> videos) {
-        ConventionRegistry registry = new ConventionRegistry();
         FileNameParts parts = NameResolver.resolve(sub, registry, registry.all());
         if (parts == null) return null;
-        String key = groupKey(sub, parts);
-        List<File> group = videosByKey.get(key);
+        List<File> group = videosByKey.get(groupKey(sub, parts));
         if (group == null || group.isEmpty()) return null;
-        // One video in the group is the obvious target; several qualities:
-        // prefer a video whose base name matches the subtitle's.
         if (group.size() == 1) return group.get(0);
         String normalised = NameResolver.normalisedBase(sub.getName());
+        for (File video : group) {
+            if (sameDir(sub, video.getParentFile())) return video;
+        }
         for (File video : group) {
             if (NameResolver.normalisedBase(video.getName()).equals(normalised)) return video;
         }
@@ -199,8 +271,6 @@ public class MovieGrouper {
         if (parts != null && parts.getTitle() != null && !parts.getTitle().isEmpty()) {
             return parts.episodeKey();
         }
-        // Unparsed: the normalised base with quality tokens removed, so the
-        // 720p and 1080p variants of an unknown movie still group together.
         String[] tokens = NameResolver.normalisedBase(file.getName()).split(" ");
         StringBuilder sb = new StringBuilder();
         for (String token : tokens) {
@@ -231,6 +301,20 @@ public class MovieGrouper {
         return NameSanitizer.sanitize(NameResolver.normalisedBase(video.getName()), "");
     }
 
+    private static String joinTags(List<String> tags) {
+        StringBuilder sb = new StringBuilder();
+        for (String tag : tags) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(tag);
+        }
+        return sb.toString();
+    }
+
+    private static String extensionOf(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot <= 0 ? "" : name.substring(dot).toLowerCase(Locale.ROOT);
+    }
+
     private static Set<String> homesOf(List<File> videos, Map<File, File> homeByVideo) {
         Set<String> out = new HashSet<String>();
         for (File video : videos) {
@@ -256,7 +340,7 @@ public class MovieGrouper {
                 continue;
             }
             if (child.getName().startsWith(".")) continue;
-            String ext = IoUtil.extensionOf(child.getName());
+            String ext = extensionOf(child.getName());
             for (String candidate : extensions) {
                 if (candidate.equals(ext)) { into.add(child); break; }
             }

@@ -431,14 +431,21 @@ final class Cards {
     static final class GroupCard extends PlanCard {
         private final Form form = new Form();
         private final JTextField dir = form.addPathField("Library folder:", true);
-        private final JCheckBox recursive = form.addCheckbox("Scan sub-folders for videos", false);
+        private final JComboBox<String> target = new JComboBox<String>();
+        private final JCheckBox nameFromSubs = form.addCheckbox("Nameless videos take the name of their episode's subtitle", false);
+        private final JCheckBox recursive = form.addCheckbox("Scan sub-folders (recommended)", true);
         private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
         private final MovieGrouper grouper = new MovieGrouper();
         private volatile OperationResult lastResult;
         private volatile Options lastOptions;
 
         GroupCard() {
-            super("Group movies", "Move each movie into its own folder - one folder per movie/episode, all its quality variants together, subtitles moved in and renamed to match their video.");
+            super("Group movies", "Move each movie into its own folder - one folder per movie/episode, all its quality variants together, subtitles moved in and renamed to match their video. Optionally rename everything to a convention (e.g. MVB) in the same pass.");
+            target.addItem("(keep current names)");
+            for (movies.core.NamingConvention convention : new movies.core.ConventionRegistry().all()) {
+                target.addItem(convention.id() + "  -  " + convention.example());
+            }
+            form.addRow("Also rename to:", target, null);
         }
 
         @Override
@@ -450,6 +457,7 @@ final class Cards {
         public void collect(Options options) {
             options.setFolder(dir.getText().trim());
             options.setRecursive(recursive.isSelected());
+            options.setNameFromSubs(nameFromSubs.isSelected());
             options.setDryRun(dryRun.isSelected());
         }
 
@@ -457,7 +465,9 @@ final class Cards {
         public OperationResult run(Options options) {
             lastPlanApplicable = false;
             lastOptions = options;
-            lastResult = grouper.plan(options);
+            String selected = String.valueOf(target.getSelectedItem());
+            String targetId = selected.startsWith("(") ? "" : selected.split("\\s+", 2)[0];
+            lastResult = grouper.plan(options, targetId);
             long planned = 0;
             for (TransferAction t : lastResult.getTransfers()) {
                 if (t.state == TransferAction.State.PLANNED) planned++;

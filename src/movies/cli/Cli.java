@@ -337,23 +337,26 @@ public final class Cli {
         public String name() { return "group-movies"; }
         public String summary() { return "Move each movie into its own folder with its subtitles and qualities"; }
         public String usage() {
-            return "Usage: movietool group-movies -d <folder> [-r] [--apply] [-v]\n"
+            return "Usage: movietool group-movies -d <folder> [-t <convention>] [--names-from subs] [--apply] [-v]\n"
                     + "\nCreates one folder per movie/episode under --dir and moves every\n"
                     + "video into it - all quality variants of the same movie together -\n"
                     + "then moves each subtitle next to its video, renamed to match it.\n"
-                    + "  -d, --dir <folder>   Library folder\n"
-                    + "  -r, --recursive      Scan sub-folders for videos (subtitles are\n"
-                    + "                       always searched recursively)\n"
-                    + "      --apply          Really move (default is a dry run)\n"
-                    + "  -v, --verbose        Show every planned move\n";
+                    + "  -d, --dir <folder>       Library folder (scanned recursively)\n"
+                    + "  -t, --to <convention>    ALSO rename everything, e.g. -t mvb\n"
+                    + "                           (see 'movietool conventions')\n"
+                    + "      --names-from subs    A video with no parsable name takes the\n"
+                    + "                           name of its episode's subtitle\n"
+                    + "      --apply              Really move (default is a dry run)\n"
+                    + "  -v, --verbose            Show every planned move\n";
         }
         public int execute(String[] args) {
             ArgParser argsParser = new ArgParser(args, aliases(), booleanFlags());
             Options options = baseOptions(argsParser);
             List<String> positionals = argsParser.positionals();
             if (!positionals.isEmpty()) options.setFolder(positionals.get(0));
+            options.setRecursive(true); // grouping always reorganises the tree
             MovieGrouper grouper = new MovieGrouper();
-            OperationResult result = grouper.plan(options);
+            OperationResult result = grouper.plan(options, argsParser.value("to", ""));
             print(result, options);
             if (!options.isApply()) {
                 long planned = 0;

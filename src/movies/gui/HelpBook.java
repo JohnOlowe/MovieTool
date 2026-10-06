@@ -131,11 +131,14 @@ final class HelpBook {
         sb.append("<h4>Group movies</h4><p>The classic 'a folder per movie' tidy-up: every movie and "
                 + "episode gets its OWN folder under the library folder - all quality variants of the "
                 + "same movie together (the 720p and the 1080p land side by side) - and each subtitle "
-                + "is moved in and RENAMED TO MATCH its video, so players always pick it up. Episode "
-                + "aware: <font face=\"monospace\">The Flash S05E05 720P.mp4</font> and its subtitle end up as "
-                + "<font face=\"monospace\">The Flash S05E05/The Flash S05E05 720P.mp4</font> + "
-                + "<font face=\"monospace\">The Flash S05E05 720P.srt</font>. Run previews every move; "
-                + "Apply carries them out.</p>");
+                + "is moved in and RENAMED TO MATCH its video, so players always pick it up. The whole "
+                + "library tree is scanned, so already-grouped folders are handled on re-runs and a "
+                + "subtitle sitting beside its video in a folder still matches THAT video.</p>");
+        sb.append("<p><b>Options:</b> 'Also rename to' renames everything in the same pass - pick "
+                + "<i>MVB (Moviebox + IMDB)</i> and get <font face=\"monospace\">The Flash - S05E05 - Title.MVB.IMDB.en.mp4</font> "
+                + "with the subtitle following the new name (quality variants keep their marker so they never collide). "
+                + "'Nameless videos take the name of their episode's subtitle' recovers files named like just "
+                + "<font face=\"monospace\">S05E03.mp4</font>. Run previews every move; Apply carries them out.</p>");
     }
 
     private static void collect(StringBuilder sb) {

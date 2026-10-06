@@ -60,6 +60,7 @@ public final class SelfTest {
         testMvbConvention();
         testNamesFromSubs();
         testGroupMovies();
+        testGroupRenameAndBorrow();
         testSanitizer();
         testRename();
         testImdbRename();
@@ -1053,7 +1054,7 @@ public final class SelfTest {
 
         Options options = options(root.getAbsolutePath());
         MovieGrouper grouper = new MovieGrouper();
-        OperationResult plan = grouper.plan(options);
+        OperationResult plan = grouper.plan(options, null);
         check("group plans", plan.errorCount() == 0);
         check("group report folders", plan.getReport().startsWith("3 movie folder(s)"));
 
@@ -1089,12 +1090,82 @@ public final class SelfTest {
                 && new File(lost, "Lost S01E01 720P.srt").exists());
 
         // A second run is a no-op: everything already in place.
-        OperationResult again = grouper.plan(options(root.getAbsolutePath()));
+        OperationResult again = grouper.plan(options(root.getAbsolutePath()), null);
         boolean movesPlanned = false;
         for (TransferAction t : again.getTransfers()) {
             if (t.state == TransferAction.State.PLANNED) movesPlanned = true;
         }
         check("group idempotent", !movesPlanned);
+    }
+
+    private static void testGroupRenameAndBorrow() throws IOException {
+        // --- Rename to MVB while grouping: qualities stay distinct, sub follows.
+        File root = tempDir("group-mvb");
+        IoUtil.writeText(touch(root, "The Flash S05E05 720P.mp4"), "");
+        IoUtil.writeText(touch(root, "The Flash S05E05 1080P.mp4"), "");
+        IoUtil.writeText(touch(root, "The Flash S05E05.en.srt"),
+                "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
+        MovieGrouper grouper = new MovieGrouper();
+        OperationResult plan = grouper.plan(options(root.getAbsolutePath()), "mvb");
+        check("group-mvb plans", plan.errorCount() == 0);
+        grouper.apply(plan, options(root.getAbsolutePath()));
+        File flash = new File(root, "The Flash S05E05");
+        check("group-mvb folder", flash.isDirectory());
+        String[] names = flash.list();
+        check("group-mvb three files", names != null && names.length == 3);
+        int mvbVideos = 0;
+        int qualityKept = 0;
+        boolean subFollows = false;
+        for (String name : names) {
+            if (name.endsWith(".mp4")) {
+                mvbVideos++;
+                check("group-mvb name in " + name, name.contains("MVB.IMDB.en") && !name.contains(".mp4.mp4"));
+                if (name.contains("720P") || name.contains("1080P")) qualityKept++;
+                String base = name.substring(0, name.length() - 4);
+                if (new File(flash, base + ".srt").exists()) subFollows = true;
+            }
+        }
+        check("group-mvb two videos renamed", mvbVideos == 2);
+        check("group-mvb quality variant kept distinct", qualityKept == 1);
+        check("group-mvb sub follows its video", subFollows);
+
+        // --- Borrow: nameless video takes its episode subtitle's name.
+        File root2 = tempDir("group-borrow");
+        IoUtil.writeText(touch(root2, "S05E03.mp4"), "");
+        IoUtil.writeText(touch(root2, "The Flash S05E03.srt"),
+                "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
+        Options borrowOptions = options(root2.getAbsolutePath());
+        borrowOptions.setNameFromSubs(true);
+        OperationResult plan2 = grouper.plan(borrowOptions, "mvb");
+        grouper.apply(plan2, borrowOptions);
+        grouper.apply(plan2, borrowOptions);
+        File folder = new File(root2, "The Flash S05E03");
+        check("group-borrow folder", folder.isDirectory());
+        check("group-borrow video renamed", new File(folder, "The Flash - S05E03.MVB.IMDB.en.mp4").exists());
+        check("group-borrow sub follows", new File(folder, "The Flash - S05E03.MVB.IMDB.en.srt").exists());
+
+        // --- Already-grouped: a sub beside its video inside a folder is left
+        // matched to THAT video (same-folder preference), not to another one.
+        File root3 = tempDir("group-samedir");
+        File box = new File(root3, "Se7en 1964");
+        IoUtil.mkdirs(box);
+        IoUtil.writeText(touch(box, "Se7en 1964 720P.mp4"), "");
+        IoUtil.writeText(touch(box, "Se7en 1964 1080P.mp4"), "");
+        IoUtil.writeText(touch(box, "Se7en 1964 720P.en.srt"),
+                "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
+        OperationResult plan3 = grouper.plan(options(root3.getAbsolutePath()), null);
+        boolean renamedToMatch = false;
+        boolean videosMoved3 = false;
+        for (TransferAction t : plan3.getTransfers()) {
+            if (t.renamesVideo) videosMoved3 = true;
+            if (t.from.getName().equals("Se7en 1964 720P.en.srt")
+                    && t.to.getName().equals("Se7en 1964 720P.srt")
+                    && t.state == TransferAction.State.PLANNED) renamedToMatch = true;
+        }
+        // The sub beside its (already grouped) videos matches THAT folder and
+        // is renamed to drop its ".en" - exactly the report from the field.
+        check("group-samedir sub renamed to match", renamedToMatch);
+        check("group-samedir videos stay", !videosMoved3);
     }
 
     private static void testFlatten() throws IOException {

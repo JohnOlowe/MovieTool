@@ -47,37 +47,52 @@ public abstract class AbstractConvention implements NamingConvention {
     }
 
     /**
-     * Splits trailing technical tokens ("HDTV.x264-FLEET.en", "720p.WEB.en")
-     * off a title fragment. Natural words ("P.O.W") are never eaten: the walk
-     * stops at the first token that is not a known quality/codec/source/language.
+     * Splits trailing technical tokens ("HDTV.x264-FLEET.en", "720p.WEB.en",
+     * "Se7en 1964 720P.en") off a title fragment. Separators may be dots OR
+     * spaces/underscores/dashes, so space-separated quality tokens are cut
+     * too. Natural words ("P.O.W", "1964") are never eaten: the walk stops
+     * at the first token that is not a known quality/codec/source/language.
      */
     protected static TechTail splitTechnicalTail(String fragment) {
-        List<String> tokens = new ArrayList<String>(Arrays.asList(fragment.split("\\.")));
         List<String> tags = new ArrayList<String>();
         int quality = 0;
         String language = "";
-        while (tokens.size() > 1) {
-            String token = tokens.get(tokens.size() - 1).trim();
+        int end = fragment.length();
+        while (end > 0) {
+            int tokenStart = end;
+            while (tokenStart > 0) {
+                char c = fragment.charAt(tokenStart - 1);
+                // '-' is NOT a separator: it belongs inside tokens such as
+                // "x264-FLEET" and "WEB-DL".
+                if (c == '.' || c == ' ' || c == '_') break;
+                tokenStart--;
+            }
+            if (tokenStart == end) break; // separator run without a token
+            String token = fragment.substring(tokenStart, end);
             String t = token.toLowerCase(Locale.ROOT);
+            boolean tech;
             if (quality == 0 && qualityTokenValue(token) > 0) {
                 quality = qualityTokenValue(token);
+                tech = true;
             } else if (language.isEmpty() && isLanguageToken(t)) {
                 language = token;
-            } else if (t.matches("(x264|x265|h264|h265|hevc|avc|xvid)(-.+)?")) {
+                tech = true;
+            } else if (t.matches("(x264|x265|h264|h265|hevc|avc|xvid)(-.+)?") || TECH_WORDS.contains(t)) {
                 tags.add(0, token);
-            } else if (TECH_WORDS.contains(t)) {
-                tags.add(0, token);
+                tech = true;
             } else {
-                break;
+                tech = false;
             }
-            tokens.remove(tokens.size() - 1);
+            if (!tech) break;
+            end = tokenStart > 0 ? tokenStart - 1 : 0; // also eat one separator
         }
-        StringBuilder sb = new StringBuilder();
-        for (String token : tokens) {
-            if (sb.length() > 0) sb.append('.');
-            sb.append(token);
+        String title = fragment.substring(0, end).trim();
+        while (title.length() > 0) {
+            char c = title.charAt(title.length() - 1);
+            if (c == '.' || c == ' ' || c == '_' || c == '-') title = title.substring(0, title.length() - 1);
+            else break;
         }
-        return new TechTail(sb.toString().trim(), quality, language, tags);
+        return new TechTail(title, quality, language, tags);
     }
 
     /** Parses "1080P", "720p" into 1080 / 720, or 0 when the token is not a quality. */
