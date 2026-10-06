@@ -252,6 +252,16 @@ public final class MovieToolGui extends JFrame {
             summary.append(" NOTE: list shows ").append(cardTitles.size() - 1).append(" entries.");
         }
         log(summary.toString());
+        instance = this;
+    }
+
+    /** The live window, for diagnostics logged from cards. */
+    private static volatile MovieToolGui instance;
+
+    /** Logs a diagnostic line into the Log tab when a window is showing. */
+    static void diagLog(String message) {
+        MovieToolGui gui = instance;
+        if (gui != null) gui.log(message);
     }
 
     private void selectCard(int index) {

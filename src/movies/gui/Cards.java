@@ -859,7 +859,15 @@ final class Cards {
                     javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
                     chooser.setMultiSelectionEnabled(true);
                     chooser.setFileSelectionMode(javax.swing.JFileChooser.FILES_AND_DIRECTORIES);
+                    long chooserStarted = System.currentTimeMillis();
                     boolean approved = chooser.showOpenDialog(form.panel()) == javax.swing.JFileChooser.APPROVE_OPTION;
+                    // The number that pinpoints a freeze: a large value means
+                    // the hang is INSIDE the chooser (shell enumeration); a
+                    // normal value with a stale screen means the paint after.
+                    MovieToolGui.diagLog("File chooser returned in "
+                            + (System.currentTimeMillis() - chooserStarted) + " ms"
+                            + (approved ? ", " + chooser.getSelectedFiles().length + " file(s) selected"
+                                        : " (cancelled)"));
                     if (approved) {
                         StringBuilder extra = new StringBuilder();
                         for (java.io.File selected : chooser.getSelectedFiles()) {
