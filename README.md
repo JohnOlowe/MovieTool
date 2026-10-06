@@ -37,6 +37,7 @@ recompiling just to point the tool at a different folder.
 | **Flatten** | Pull media files out of nested folders into one folder, renaming on collisions and cleaning up emptied folders. |
 | **Merge subtitles** | Stack two or more SRT tracks into one (e.g. two languages, or SDH + dialogue). Overlaps are swept and coalesced. |
 | **VTT → SRT** | Batch-convert WebVTT subtitles to SubRip, stripping cue settings and `<c>` tags while keeping `<i>/<b>/<u>`. |
+| **Group movies** | One folder per movie/episode: all quality variants together, subtitles moved in and renamed to match their video. |
 | **Shift timing** | Move every cue earlier or later by a constant amount - one file, a folder, or any hand-picked list with a shared and/or per-file offset in one run; one-time `.bak` backups. |
 | **Episodes** | List every recognised episode grouped per show and season (text or CSV). |
 | **Library check** | Health report: conventions in use, unrecognised names, duplicate episodes, episodes missing subtitles. |
@@ -117,6 +118,7 @@ movietool rename -d <folder> -t <convention> | --pattern p [-r] [--names-from su
 movietool imdb-rename -d <folder> [--titles <file>] [-s <subs>] [--show name] [--style s01e01|1x01]
                      [--tag MVB.IMDB.en | --no-tag] [--replace-with c] [-r] [--overwrite] [--apply]
 movietool sync-subs -d <videos-folder> [-s <subs-folder>] [-r] [--move] [--names-from subs] [--overwrite] [--apply]
+movietool group-movies -d <folder> [-r] [--apply]
 movietool relocate-subs -d <folder> [-r] [--overwrite] [--apply]
 movietool clean-titles (-f <file> | -d <folder>) [-o out] [--replace] [--no-sort] [--apply]
 movietool download-subs -d <folder> [-r] [--lang en] [--api-key k] [--into-subs-folder] [--apply]

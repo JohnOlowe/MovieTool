@@ -77,6 +77,14 @@ public class RegularConvention extends AbstractConvention {
             cleaned = cleaned.substring(0, marker.start()) + cleaned.substring(marker.end());
         }
 
+        // Trailing technical tokens (".en", ".HDTV.x264", " 1080p") never
+        // belong in the title - with or without an episode marker.
+        TechTail tail = splitTechnicalTail(cleaned.replace('_', ' ').trim());
+        if (tail.quality > 0 && parts.getQuality() == 0) parts.setQuality(tail.quality);
+        if (parts.getLanguage().isEmpty() && !tail.language.isEmpty()) parts.setLanguage(tail.language);
+        parts.getTags().addAll(tail.tags);
+        cleaned = tail.title;
+
         String title = cleaned.replace('_', ' ').trim();
         if (title.isEmpty()) return null;
         parts.setTitle(title);

@@ -14,6 +14,7 @@ import movies.ops.SubsDownloader;
 import movies.ops.SubsMerger;
 import movies.ops.SubsRelocator;
 import movies.ops.SubsShift;
+import movies.ops.MovieGrouper;
 import movies.ops.SubsSync;
 import movies.ops.TitlesCleaner;
 import movies.ops.VttConvert;
@@ -418,6 +419,68 @@ final class Cards {
         }
     }
 
+    // ------------------------------------------------------------ group
+
+    /** One folder per movie/episode: every quality variant plus its subtitles. */
+    static final class GroupCard extends PlanCard {
+        private final Form form = new Form();
+        private final JTextField dir = form.addPathField("Library folder:", true);
+        private final JCheckBox recursive = form.addCheckbox("Scan sub-folders for videos", false);
+        private final JCheckBox dryRun = form.addCheckbox("Dry run (preview only)", true);
+        private final MovieGrouper grouper = new MovieGrouper();
+        private volatile OperationResult lastResult;
+        private volatile Options lastOptions;
+
+        GroupCard() {
+            super("Group movies", "Move each movie into its own folder - one folder per movie/episode, all its quality variants together, subtitles moved in and renamed to match their video.");
+        }
+
+        @Override
+        public JComponent component() {
+            return form.panel();
+        }
+
+        @Override
+        public void collect(Options options) {
+            options.setFolder(dir.getText().trim());
+            options.setRecursive(recursive.isSelected());
+            options.setDryRun(dryRun.isSelected());
+        }
+
+        @Override
+        public OperationResult run(Options options) {
+            lastPlanApplicable = false;
+            lastOptions = options;
+            lastResult = grouper.plan(options);
+            long planned = 0;
+            for (TransferAction t : lastResult.getTransfers()) {
+                if (t.state == TransferAction.State.PLANNED) planned++;
+            }
+            if (!options.isDryRun() && planned > 0 && lastResult.errorCount() == 0) {
+                grouper.apply(lastResult, options);
+                lastPlanApplicable = false;
+            } else {
+                lastPlanApplicable = planned > 0 && lastResult.errorCount() == 0;
+            }
+            if (planned == 0 && lastResult.errorCount() == 0) {
+                lastResult.add(Problem.info("Nothing to group - every file is already in place."));
+            }
+            return lastResult;
+        }
+
+        @Override
+        public OperationResult apply() {
+            if (lastResult == null || lastOptions == null) {
+                OperationResult result = new OperationResult();
+                result.add(Problem.error("Run a dry run first."));
+                return result;
+            }
+            grouper.apply(lastResult, lastOptions);
+            lastPlanApplicable = false;
+            return lastResult;
+        }
+    }
+
     // ---------------------------------------------------------- relocate
 
     static final class RelocateCard extends PlanCard {
@@ -796,7 +859,8 @@ final class Cards {
                     javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
                     chooser.setMultiSelectionEnabled(true);
                     chooser.setFileSelectionMode(javax.swing.JFileChooser.FILES_AND_DIRECTORIES);
-                    if (chooser.showOpenDialog(form.panel()) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                    boolean approved = chooser.showOpenDialog(form.panel()) == javax.swing.JFileChooser.APPROVE_OPTION;
+                    if (approved) {
                         StringBuilder extra = new StringBuilder();
                         for (java.io.File selected : chooser.getSelectedFiles()) {
                             if (extra.length() > 0 || files.getText().trim().length() > 0) extra.append('\n');
@@ -807,20 +871,13 @@ final class Cards {
                             existing = existing + "\n";
                         }
                         files.setText(existing + extra.toString());
-                        // Some Windows render pipelines leave stale pixels
-                        // after a modal dialog closes: repaint explicitly.
-                        files.revalidate();
-                        files.repaint();
-                        form.panel().revalidate();
-                        form.panel().repaint();
-                        javax.swing.SwingUtilities.invokeLater(new Runnable() {
-                            @Override
-                            public void run() {
-                                java.awt.Window window = javax.swing.SwingUtilities.getWindowAncestor(form.panel());
-                                if (window != null) window.repaint();
-                            }
-                        });
                     }
+                    // Returning from the chooser (pick or cancel) is exactly
+                    // where Windows renders go stale: force the same full
+                    // refresh the user gets by switching cards and back.
+                    form.panel().revalidate();
+                    form.panel().repaint();
+                    MovieToolGui.refreshWindow(form.panel());
                 }
             });
             form.addRow("Files / folders:", addFiles, new JLabel("one per line; a folder line shifts every .srt inside it"));
@@ -948,6 +1005,7 @@ final class Cards {
         tryAdd(cards, "IMDB rename", new CardMaker() { @Override public OpCard make() { return new ImdbCard(); } });
         tryAdd(cards, "Clean titles list", new CardMaker() { @Override public OpCard make() { return new CleanTitlesCard(); } });
         tryAdd(cards, "Sync subtitles", new CardMaker() { @Override public OpCard make() { return new SyncCard(); } });
+        tryAdd(cards, "Group movies", new CardMaker() { @Override public OpCard make() { return new GroupCard(); } });
         tryAdd(cards, "Collect subtitles", new CardMaker() { @Override public OpCard make() { return new RelocateCard(); } });
         tryAdd(cards, "Download subtitles", new CardMaker() { @Override public OpCard make() { return new DownloadSubsCard(); } });
         tryAdd(cards, "Flatten", new CardMaker() { @Override public OpCard make() { return new FlattenCard(); } });

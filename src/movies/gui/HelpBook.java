@@ -26,6 +26,7 @@ final class HelpBook {
         imdb(sb);
         cleanTitles(sb);
         sync(sb);
+        group(sb);
         collect(sb);
         download(sb);
         flatten(sb);
@@ -124,6 +125,17 @@ final class HelpBook {
                 + "when your subtitles carry the better names - the video is then renamed to the "
                 + "subtitle's name too, so both files of the pair end up identical apart from the "
                 + "extension.</p>");
+    }
+
+    private static void group(StringBuilder sb) {
+        sb.append("<h4>Group movies</h4><p>The classic 'a folder per movie' tidy-up: every movie and "
+                + "episode gets its OWN folder under the library folder - all quality variants of the "
+                + "same movie together (the 720p and the 1080p land side by side) - and each subtitle "
+                + "is moved in and RENAMED TO MATCH its video, so players always pick it up. Episode "
+                + "aware: <font face=\"monospace\">The Flash S05E05 720P.mp4</font> and its subtitle end up as "
+                + "<font face=\"monospace\">The Flash S05E05/The Flash S05E05 720P.mp4</font> + "
+                + "<font face=\"monospace\">The Flash S05E05 720P.srt</font>. Run previews every move; "
+                + "Apply carries them out.</p>");
     }
 
     private static void collect(StringBuilder sb) {

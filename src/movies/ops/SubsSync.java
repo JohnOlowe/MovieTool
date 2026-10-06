@@ -201,7 +201,28 @@ public class SubsSync {
 
     // ------------------------------------------------------------ matching
 
-    private VideoCandidate findBestVideo(List<VideoCandidate> videos, File sub, FileNameParts subParts,
+    /**
+     * Matches one subtitle to its best video among the given files using the
+     * full tier logic (episode key, movie key, raw episode marker, normalised
+     * names). Used by the subtitle sync and the movie grouper alike.
+     *
+     * @return the matching video, or null when nothing fits
+     */
+    public static File matchSubtitle(File sub, List<File> videos) {
+        ConventionRegistry registry = new ConventionRegistry();
+        List<VideoCandidate> candidates = new ArrayList<VideoCandidate>();
+        for (File video : videos) {
+            candidates.add(new VideoCandidate(video,
+                    NameResolver.resolve(video, registry, registry.all()),
+                    NameResolver.rawEpisode(video.getName()),
+                    NameResolver.normalisedBase(video.getName())));
+        }
+        VideoCandidate best = findBestVideo(candidates, sub,
+                NameResolver.resolve(sub, registry, registry.all()), new HashSet<String>());
+        return best == null ? null : best.file;
+    }
+
+    private static VideoCandidate findBestVideo(List<VideoCandidate> videos, File sub, FileNameParts subParts,
                                          Set<String> usedVideos) {
         // Tier 1 & 2: parse-based keys (episode key first, then movie key).
         if (subParts != null) {
@@ -236,7 +257,7 @@ public class SubsSync {
         return pick(candidates, sub, usedVideos);
     }
 
-    private VideoCandidate pick(List<VideoCandidate> candidates, File sub, Set<String> usedVideos) {
+    private static VideoCandidate pick(List<VideoCandidate> candidates, File sub, Set<String> usedVideos) {
         if (candidates.isEmpty()) return null;
         VideoCandidate best = null;
         int bestScore = Integer.MIN_VALUE;

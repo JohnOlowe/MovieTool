@@ -15,6 +15,7 @@ import movies.ops.SubsMerger;
 import movies.ops.SubsRelocator;
 import movies.ops.SubsDownloader;
 import movies.ops.SubsShift;
+import movies.ops.MovieGrouper;
 import movies.ops.TitlesCleaner;
 import movies.ops.SubsSync;
 import movies.ops.VttConvert;
@@ -55,6 +56,7 @@ public final class Cli {
         add(new RenameCommand());
         add(new ImdbRenameCommand());
         add(new SyncSubsCommand());
+        add(new GroupMoviesCommand());
         add(new RelocateSubsCommand());
         add(new CleanTitlesCommand());
         add(new DownloadSubsCommand());
@@ -331,7 +333,42 @@ public final class Cli {
         }
     }
 
-    private static class RelocateSubsCommand implements Command {
+        private static class GroupMoviesCommand implements Command {
+        public String name() { return "group-movies"; }
+        public String summary() { return "Move each movie into its own folder with its subtitles and qualities"; }
+        public String usage() {
+            return "Usage: movietool group-movies -d <folder> [-r] [--apply] [-v]\n"
+                    + "\nCreates one folder per movie/episode under --dir and moves every\n"
+                    + "video into it - all quality variants of the same movie together -\n"
+                    + "then moves each subtitle next to its video, renamed to match it.\n"
+                    + "  -d, --dir <folder>   Library folder\n"
+                    + "  -r, --recursive      Scan sub-folders for videos (subtitles are\n"
+                    + "                       always searched recursively)\n"
+                    + "      --apply          Really move (default is a dry run)\n"
+                    + "  -v, --verbose        Show every planned move\n";
+        }
+        public int execute(String[] args) {
+            ArgParser argsParser = new ArgParser(args, aliases(), booleanFlags());
+            Options options = baseOptions(argsParser);
+            List<String> positionals = argsParser.positionals();
+            if (!positionals.isEmpty()) options.setFolder(positionals.get(0));
+            MovieGrouper grouper = new MovieGrouper();
+            OperationResult result = grouper.plan(options);
+            print(result, options);
+            if (!options.isApply()) {
+                long planned = 0;
+                for (TransferAction t : result.getTransfers()) {
+                    if (t.state == TransferAction.State.PLANNED) planned++;
+                }
+                System.out.println(planned + " move(s) planned (dry run; add --apply to execute).");
+                return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+            }
+            grouper.apply(result, options);
+            print(result, options);
+            return result.errorCount() > 0 ? EXIT_ERRORS : EXIT_OK;
+        }
+    }
+private static class RelocateSubsCommand implements Command {
         public String name() { return "relocate-subs"; }
         public String summary() { return "Move subtitles (and their folders) into the folder's 'Subtitles' sub-folder"; }
         public String usage() {

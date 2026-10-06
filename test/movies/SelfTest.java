@@ -16,6 +16,7 @@ import movies.ops.EpisodeLister;
 import movies.ops.SubsDownloader;
 import movies.ops.SubsMerger;
 import movies.ops.SubsRelocator;
+import movies.ops.MovieGrouper;
 import movies.ops.SubsShift;
 import movies.ops.SubsSync;
 import movies.ops.TitlesCleaner;
@@ -58,6 +59,7 @@ public final class SelfTest {
         testNxnnVideos();
         testMvbConvention();
         testNamesFromSubs();
+        testGroupMovies();
         testSanitizer();
         testRename();
         testImdbRename();
@@ -1035,6 +1037,64 @@ public final class SelfTest {
                 && tech.getTags().contains("HDTV"));
         movies.core.FileNameParts movie = registry.detect("Se7en (1995).MVB.IMDB.en.mp4", registry.all());
         check("mvb parse movie", movie != null && "Se7en".equals(movie.getTitle()) && movie.getYear() == 1995);
+    }
+
+    private static void testGroupMovies() throws IOException {
+        File root = tempDir("group");
+        String[] videos = { "The Flash S05E05 720P.mp4", "The Flash S05E05 1080P.mp4",
+                "Se7en 1964 720P.mp4", "Se7en 1964 1080P.mp4", "Lost S01E01 720P.mp4" };
+        for (String name : videos) IoUtil.writeText(touch(root, name), "");
+        IoUtil.writeText(touch(root, "The Flash S05E05.en.srt"),
+                "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
+        IoUtil.writeText(touch(root, "Se7en 1964.en.srt"),
+                "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
+        IoUtil.writeText(touch(root, "Lost.S01E01.720p.WEB-DL.srt"),
+                "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
+
+        Options options = options(root.getAbsolutePath());
+        MovieGrouper grouper = new MovieGrouper();
+        OperationResult plan = grouper.plan(options);
+        check("group plans", plan.errorCount() == 0);
+        check("group report folders", plan.getReport().startsWith("3 movie folder(s)"));
+
+        grouper.apply(plan, options);
+
+        // Only folders remain at the top level, exactly three.
+        File[] top = root.listFiles();
+        int dirs = 0;
+        for (File f : top) if (f.isDirectory()) dirs++;
+        for (File f : top) check("group top-level file moved: " + f.getName(), f.isDirectory());
+        check("group folder count", dirs == 3);
+
+        // Flash folder: both qualities + the sub renamed to match a video.
+        File flash = new File(root, "The Flash S05E05");
+        check("group flash folder", flash.isDirectory());
+        check("group flash 720", new File(flash, "The Flash S05E05 720P.mp4").exists());
+        check("group flash 1080", new File(flash, "The Flash S05E05 1080P.mp4").exists());
+        boolean flashSub = new File(flash, "The Flash S05E05 720P.srt").exists()
+                || new File(flash, "The Flash S05E05 1080P.srt").exists();
+        check("group flash sub renamed to movie", flashSub);
+        check("group flash old sub gone", !new File(root, "The Flash S05E05.en.srt").exists());
+
+        // Se7en folder likewise.
+        File se7en = new File(root, "Se7en 1964");
+        check("group se7en folder", se7en.isDirectory()
+                && new File(se7en, "Se7en 1964 720P.mp4").exists()
+                && new File(se7en, "Se7en 1964 1080P.mp4").exists());
+
+        // Lost: dotted sub with WEB-DL tag matches and is renamed to the video.
+        File lost = new File(root, "Lost S01E01");
+        check("group lost folder", lost.isDirectory()
+                && new File(lost, "Lost S01E01 720P.mp4").exists()
+                && new File(lost, "Lost S01E01 720P.srt").exists());
+
+        // A second run is a no-op: everything already in place.
+        OperationResult again = grouper.plan(options(root.getAbsolutePath()));
+        boolean movesPlanned = false;
+        for (TransferAction t : again.getTransfers()) {
+            if (t.state == TransferAction.State.PLANNED) movesPlanned = true;
+        }
+        check("group idempotent", !movesPlanned);
     }
 
     private static void testFlatten() throws IOException {

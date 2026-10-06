@@ -309,6 +309,20 @@ public final class MovieToolGui extends JFrame {
     // ------------------------------------------------------------- running
 
     /**
+     * Full structural refresh of the whole window - invalidate + validate +
+     * repaint of the top-level. This is the programmatic version of the
+     * "switch to another card and back" cure for stale Windows paints
+     * (DirectDraw/D3D leaving old pixels after native dialogs close).
+     */
+    static void refreshWindow(java.awt.Component any) {
+        java.awt.Window window = javax.swing.SwingUtilities.getWindowAncestor(any);
+        if (window == null) return;
+        window.invalidate();
+        window.validate();
+        window.repaint();
+    }
+
+    /**
      * Null when the collected options carry enough input to run (a folder -
      * or, for the multi-pass Shift card, at least one shift pass with paths).
      */
