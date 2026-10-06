@@ -201,7 +201,7 @@ public final class MovieToolGui extends JFrame {
 
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topPane, resultsTabs);
         split.setResizeWeight(0.62);
-        split.setDividerLocation(360);
+        split.setDividerLocation(430);
 
         // Toolbar row.
         runButton.setAction(new AbstractAction("Run") {

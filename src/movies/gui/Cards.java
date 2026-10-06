@@ -122,6 +122,12 @@ final class Cards {
          * beats the bottom filler, so the stretch goes here, not to the filler.
          */
         void addRowTall(String label, JComponent left, String hint) {
+            // When the card area is tight the layout crushes weighty rows to
+            // their minimum - which for a scroll pane is just the scroll bar.
+            // Enforce a usable floor so the list always shows content.
+            if (left.getMinimumSize().height < 150) {
+                left.setMinimumSize(new java.awt.Dimension(120, 150));
+            }
             GridBagConstraints c = new GridBagConstraints();
             c.gridx = 0;
             c.gridy = row;
@@ -852,25 +858,28 @@ final class Cards {
             files.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12));
             javax.swing.JScrollPane listScroll = new javax.swing.JScrollPane(files);
             listScroll.setPreferredSize(new java.awt.Dimension(520, 200));
-            JButton addFiles = new JButton("Add files...");
+            JButton addFiles = new JButton("Add files... (multi-select)");
             addFiles.addActionListener(new java.awt.event.ActionListener() {
                 @Override
                 public void actionPerformed(java.awt.event.ActionEvent event) {
-                    javax.swing.JFileChooser chooser = new javax.swing.JFileChooser();
-                    chooser.setMultiSelectionEnabled(true);
-                    chooser.setFileSelectionMode(javax.swing.JFileChooser.FILES_AND_DIRECTORIES);
+                    // The native AWT dialog, NOT JFileChooser: Swing's chooser
+                    // provably parks the EDT for ~9 seconds on this user's
+                    // Windows 10 + Java 21 machine after its window closes.
+                    java.awt.Window window = javax.swing.SwingUtilities.getWindowAncestor(form.panel());
+                    java.awt.FileDialog dialog = new java.awt.FileDialog(
+                            window instanceof java.awt.Frame ? (java.awt.Frame) window : null,
+                            "Add subtitle files", java.awt.FileDialog.LOAD);
+                    dialog.setMultipleMode(true);
                     long chooserStarted = System.currentTimeMillis();
-                    boolean approved = chooser.showOpenDialog(form.panel()) == javax.swing.JFileChooser.APPROVE_OPTION;
-                    // The number that pinpoints a freeze: a large value means
-                    // the hang is INSIDE the chooser (shell enumeration); a
-                    // normal value with a stale screen means the paint after.
-                    MovieToolGui.diagLog("File chooser returned in "
-                            + (System.currentTimeMillis() - chooserStarted) + " ms"
-                            + (approved ? ", " + chooser.getSelectedFiles().length + " file(s) selected"
-                                        : " (cancelled)"));
-                    if (approved) {
+                    dialog.setVisible(true);
+                    java.io.File[] picked = dialog.getFiles();
+                    dialog.dispose();
+                    MovieToolGui.diagLog("File dialog returned in "
+                            + (System.currentTimeMillis() - chooserStarted) + " ms, "
+                            + picked.length + " file(s) selected");
+                    if (picked.length > 0) {
                         StringBuilder extra = new StringBuilder();
-                        for (java.io.File selected : chooser.getSelectedFiles()) {
+                        for (java.io.File selected : picked) {
                             if (extra.length() > 0 || files.getText().trim().length() > 0) extra.append('\n');
                             extra.append(selected.getAbsolutePath());
                         }
@@ -888,7 +897,7 @@ final class Cards {
                     MovieToolGui.refreshWindow(form.panel());
                 }
             });
-            form.addRow("Files / folders:", addFiles, new JLabel("one per line; a folder line shifts every .srt inside it"));
+            form.addRow("Files / folders:", addFiles, new JLabel("folders: type or paste a folder path on its own line"));
             form.addRowTall("Hand-picked list:", listScroll, "path | 3.5 = this file gets its own shift time");
             form.addRow("Shift by (seconds):", seconds, new JLabel("used for lines without their own | time"));
             recursive = form.addCheckbox("Include sub-folders (for folder lines)", false);
