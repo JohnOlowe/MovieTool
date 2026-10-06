@@ -11,6 +11,20 @@ import java.awt.GraphicsEnvironment;
  */
 public final class Main {
 
+    static {
+        // BEFORE anything loads AWT/Swing/Java2D: the Windows Direct3D
+        // pipeline is the cause of stale and blank panels after native
+        // dialogs on Windows 10 + Java 21. Setting the properties here (a
+        // static block) guarantees they exist before the graphics pipeline
+        // initialises - launch() ran them only AFTER GraphicsEnvironment
+        // had already touched AWT, which can be too late.
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("windows")) {
+            System.setProperty("sun.java2d.noddraw", "true");
+            System.setProperty("sun.java2d.d3d", "false");
+        }
+    }
+
     private Main() {
     }
 

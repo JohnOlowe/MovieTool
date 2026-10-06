@@ -86,17 +86,8 @@ public final class MovieToolGui extends JFrame {
 
     /** Opens the window on the event dispatch thread. */
     public static void launch() {
-        // Take Swing off the Windows Direct3D pipeline BEFORE any window is
-        // created. The movietool.bat launcher passes these as JVM flags, but
-        // a double-clicked movietool.jar skips the bat - and D3D is the
-        // classic cause of stale/blank panels on Windows (e.g. after the
-        // file-chooser dialog). Harmless on other systems.
-        String os = System.getProperty("os.name", "").toLowerCase();
-        final boolean windows = os.contains("windows");
-        if (windows) {
-            System.setProperty("sun.java2d.noddraw", "true");
-            System.setProperty("sun.java2d.d3d", "false");
-        }
+        // The Direct3D properties are set in Main's static block - earlier
+        // than anything here could manage.
         SwingUtilities.invokeLater(new Runnable() {
             @Override
             public void run() {
@@ -276,6 +267,32 @@ public final class MovieToolGui extends JFrame {
         if (gui != null) gui.selectCard(gui.cardList.getSelectedIndex());
     }
 
+    /**
+     * The rebuild DEFERRED past the dialog's teardown. Paint requests fired
+     * while the native dialog's window is still being disposed are lost on
+     * Windows 10 + Java 21 - rebuilding in the same instant produced blank
+     * cards. This rebuilds on the next event cycle AND once more after 350
+     * ms, both well after the dialog is fully gone.
+     */
+    static void rebuildCardSoon() {
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                rebuildCard();
+                refreshWindow(instance);
+            }
+        });
+        javax.swing.Timer secondPass = new javax.swing.Timer(350, new java.awt.event.ActionListener() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                rebuildCard();
+                refreshWindow(instance);
+            }
+        });
+        secondPass.setRepeats(false);
+        secondPass.start();
+    }
+
     private void selectCard(int index) {
         if (index < 0 || index > cards.size()) index = 0;
         // Direct swap: remove everything and add the one component to show.
@@ -292,7 +309,10 @@ public final class MovieToolGui extends JFrame {
         } else {
             current = cards.get(index);
             cardList.setSelectedIndex(index);
-            cardPanel.add(current.component(), BorderLayout.NORTH);
+            // CENTER: forms keep their compact top-aligned layout via the
+            // Form filler, while a card that wants to stretch (the Shift
+            // card's resizable list) actually gets the space.
+            cardPanel.add(current.component(), BorderLayout.CENTER);
             descriptionLabel.setText(current.getDescription());
             runButton.setEnabled(true);
             updateApplyButton();

@@ -846,6 +846,7 @@ final class Cards {
     static final class ShiftCard extends OpCard {
         private final Form form = new Form();
         private final javax.swing.JTextArea files = new javax.swing.JTextArea();
+        private final javax.swing.JScrollPane listScroll = new javax.swing.JScrollPane(files);
         private final JSpinner seconds = new JSpinner(new SpinnerNumberModel(Double.valueOf(0), Double.valueOf(-600),
                 Double.valueOf(600), Double.valueOf(0.5)));
         private final JCheckBox recursive;
@@ -856,8 +857,9 @@ final class Cards {
             super("Shift timing", "Delay or advance subtitles by a constant amount (positive = later). Hand-pick any number of files/folders - one per line - all shifted in ONE run; give any line its own time with 'path | 3.5'. A one-time .bak of each original is kept.");
             files.setRows(12);
             files.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12));
-            javax.swing.JScrollPane listScroll = new javax.swing.JScrollPane(files);
             listScroll.setPreferredSize(new java.awt.Dimension(520, 200));
+            listScroll.setBorder(javax.swing.BorderFactory.createTitledBorder(
+                    "Hand-picked list - one path per line; 'path | 3.5' gives that file its own time; drag the bar below to resize"));
             JButton addFiles = new JButton("Add files... (multi-select)");
             addFiles.addActionListener(new java.awt.event.ActionListener() {
                 @Override
@@ -889,17 +891,17 @@ final class Cards {
                         }
                         files.setText(existing + extra.toString());
                     }
-                    // The user-proven cure, automated: physically re-add
-                    // the card (what switching away and back does). A plain
-                    // repaint does not revive the stale pixels on Windows 10.
+                    // The user-proven cure, automated - but DEFERRED:
+                    // rebuilding inside the dialog-return event lands in the
+                    // window where the closing dialog still owns painting,
+                    // which produced blank cards. rebuildCardSoon runs on
+                    // the next cycle plus a 350 ms second pass.
                     form.panel().revalidate();
                     form.panel().repaint();
-                    MovieToolGui.rebuildCard();
-                    MovieToolGui.refreshWindow(form.panel());
+                    MovieToolGui.rebuildCardSoon();
                 }
             });
             form.addRow("Files / folders:", addFiles, new JLabel("folders: type or paste a folder path on its own line"));
-            form.addRowTall("Hand-picked list:", listScroll, "path | 3.5 = this file gets its own shift time");
             form.addRow("Shift by (seconds):", seconds, new JLabel("used for lines without their own | time"));
             recursive = form.addCheckbox("Include sub-folders (for folder lines)", false);
             backup = form.addCheckbox("Keep a .bak copy of each file", true);
@@ -907,7 +909,14 @@ final class Cards {
 
         @Override
         public JComponent component() {
-            return form.panel();
+            // The list lives in its own splitter zone: drag the bar to make
+            // the hand-picked list as tall or short as you like.
+            javax.swing.JSplitPane split = new javax.swing.JSplitPane(javax.swing.JSplitPane.VERTICAL_SPLIT,
+                    listScroll, form.panel());
+            split.setResizeWeight(1.0);
+            split.setContinuousLayout(true);
+            split.setDividerLocation(170);
+            return split;
         }
 
         @Override
