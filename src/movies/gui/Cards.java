@@ -874,7 +874,7 @@ final class Cards {
                     dialog.setVisible(true);
                     java.io.File[] picked = dialog.getFiles();
                     dialog.dispose();
-                    MovieToolGui.diagLog("File dialog returned in "
+                    MovieToolGui.diagLog("File dialog closed after "
                             + (System.currentTimeMillis() - chooserStarted) + " ms, "
                             + picked.length + " file(s) selected");
                     if (picked.length > 0) {
@@ -889,11 +889,12 @@ final class Cards {
                         }
                         files.setText(existing + extra.toString());
                     }
-                    // Returning from the chooser (pick or cancel) is exactly
-                    // where Windows renders go stale: force the same full
-                    // refresh the user gets by switching cards and back.
+                    // The user-proven cure, automated: physically re-add
+                    // the card (what switching away and back does). A plain
+                    // repaint does not revive the stale pixels on Windows 10.
                     form.panel().revalidate();
                     form.panel().repaint();
+                    MovieToolGui.rebuildCard();
                     MovieToolGui.refreshWindow(form.panel());
                 }
             });

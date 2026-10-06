@@ -264,6 +264,18 @@ public final class MovieToolGui extends JFrame {
         if (gui != null) gui.log(message);
     }
 
+    /**
+     * Re-selects the current card, which physically removes and re-adds its
+     * component. This is the programmatic version of the user's proven cure
+     * for stale card content after a native dialog closes on Windows 10 -
+     * a plain window repaint does NOT revive the pixels, but re-adding the
+     * component does. Safe to call headlessly (no-op without a window).
+     */
+    static void rebuildCard() {
+        MovieToolGui gui = instance;
+        if (gui != null) gui.selectCard(gui.cardList.getSelectedIndex());
+    }
+
     private void selectCard(int index) {
         if (index < 0 || index > cards.size()) index = 0;
         // Direct swap: remove everything and add the one component to show.

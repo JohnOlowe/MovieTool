@@ -54,8 +54,9 @@ final class GuiUtil {
         dialog.setMultipleMode(multiple);
         long started = System.currentTimeMillis();
         dialog.setVisible(true);
-        movies.gui.MovieToolGui.diagLog("File dialog returned in "
+        movies.gui.MovieToolGui.diagLog("File dialog closed after "
                 + (System.currentTimeMillis() - started) + " ms");
+        movies.gui.MovieToolGui.rebuildCard();
         java.io.File[] files = dialog.getFiles();
         dialog.dispose();
         return files.length == 0 ? null : files[0];
@@ -82,6 +83,7 @@ final class GuiUtil {
                                   boolean directories) {
         while (true) {
             int choice = chooser.showOpenDialog(parent);
+            movies.gui.MovieToolGui.rebuildCard();
             if (choice != JFileChooser.APPROVE_OPTION) return false;
             File selected = chooser.getSelectedFile();
             if (selected == null) return false;
