@@ -27,6 +27,10 @@ public class RegularConvention extends AbstractConvention {
     private static final Pattern SEASON_EPISODE =
             Pattern.compile("(?i)(?:^|[._\\- ])s(\\d{1,2})e(\\d{1,3})(?=[._\\- ]|$)");
 
+    /** Spaced variant "S01 E06" as shipped by some hosts. */
+    private static final Pattern SPACED_SEASON_EPISODE =
+            Pattern.compile("(?i)(?:^|[._\\- ])s(\\d{1,2})[ ._]e(\\d{1,3})(?=[._\\- ]|$)");
+
     @Override
     public String id() { return "regular"; }
 
@@ -68,10 +72,15 @@ public class RegularConvention extends AbstractConvention {
             }
         }
 
-        // Structured "S05E03" episode marker (Dood and friends): recorded as
-        // real season/episode fields and removed from the title.
+        // Structured episode marker - "S05E03" and the spaced "S01 E06" -
+        // recorded as real season/episode fields and removed from the title.
         Matcher marker = SEASON_EPISODE.matcher(cleaned);
-        if (marker.find()) {
+        boolean marked = marker.find();
+        if (!marked) {
+            marker = SPACED_SEASON_EPISODE.matcher(cleaned);
+            marked = marker.find();
+        }
+        if (marked) {
             parts.setSeason(Integer.parseInt(marker.group(1)));
             parts.setEpisode(Integer.parseInt(marker.group(2)));
             cleaned = cleaned.substring(0, marker.start()) + cleaned.substring(marker.end());
@@ -81,6 +90,7 @@ public class RegularConvention extends AbstractConvention {
         // belong in the title - with or without an episode marker.
         TechTail tail = splitTechnicalTail(cleaned.replace('_', ' ').trim());
         if (tail.quality > 0 && parts.getQuality() == 0) parts.setQuality(tail.quality);
+        if (tail.year > 0 && parts.getYear() == 0) parts.setYear(tail.year);
         if (parts.getLanguage().isEmpty() && !tail.language.isEmpty()) parts.setLanguage(tail.language);
         parts.getTags().addAll(tail.tags);
         cleaned = tail.title;

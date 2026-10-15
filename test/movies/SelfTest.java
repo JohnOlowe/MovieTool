@@ -61,6 +61,7 @@ public final class SelfTest {
         testNamesFromSubs();
         testGroupMovies();
         testGroupRenameAndBorrow();
+        testYearParsing();
         testSanitizer();
         testRename();
         testImdbRename();
@@ -233,12 +234,12 @@ public final class SelfTest {
         ConventionRegistry registry = new ConventionRegistry();
         FileNameParts parts = registry.detect("The_Flash_1080P_S01_E01.mp4", registry.all());
         String name = RenameEngine.PatternBuilder.build("{title} {s01e01}{ext}", parts);
-        check("pattern s01e01", name.equals("The_Flash S01E01.mp4"));
+        check("pattern s01e01", name.equals("The Flash S01E01.mp4"));
         name = RenameEngine.PatternBuilder.build("{s1e1} {title}{ext}", parts);
-        check("pattern s1e1", name.equals("1E1 The_Flash.mp4"));
+        check("pattern s1e1", name.equals("1E1 The Flash.mp4"));
         parts = registry.detect("American_Murderer_English.srt", registry.all());
         name = RenameEngine.PatternBuilder.build("{title} (2023){ext}", parts);
-        check("pattern movie", name.equals("American_Murderer (2023).srt"));
+        check("pattern movie", name.equals("American Murderer (2023).srt"));
     }
 
     private static void testSrtParsing() {
@@ -306,7 +307,7 @@ public final class SelfTest {
         plan = engine.plan(options, "");
         check("rename replan stable", plan.renameCount() == 3);
         plan.apply();
-        check("rename applied", new File(dir, "The_Flash S01E01.mp4").exists());
+        check("rename applied", new File(dir, "The Flash S01E01.mp4").exists());
         check("rename removed old", !new File(dir, "The_Flash_1080P_S01_E01.mp4").exists());
         check("rename plain de-underlined", new File(dir, "Random Junk 123.mp4").exists());
 
@@ -533,7 +534,7 @@ public final class SelfTest {
         check("rename guard one action", guardPlan.renameCount() == 1);
         check("rename guard no dangling dash", !guardPlan.actions().get(0).to.getName().contains(" - ."));
         guardPlan.apply();
-        check("rename guard applied", new File(guardDir, "The_Flash S01E01.mp4").exists());
+        check("rename guard applied", new File(guardDir, "The Flash S01E01.mp4").exists());
     }
 
     private static void testTitlesClean() throws IOException {
@@ -909,7 +910,8 @@ public final class SelfTest {
         check("dood dotted quality", dotted != null && dotted.getQuality() == 720);
 
         FileNameParts plain = registry.detect("Se7en_2009.mp4", registry.all());
-        check("dood plain untouched", plain != null && "Se7en 2009".equals(plain.getTitle()) && !plain.isEpisode());
+        check("dood plain year parsed", plain != null && "Se7en".equals(plain.getTitle())
+                && plain.getYear() == 2009 && !plain.isEpisode());
 
         check("dood pattern build", "Flash - S05E03.mp4".equals(
                 RenameEngine.PatternBuilder.build("{title} - {s01e01}{ext}", dood)));
@@ -1038,16 +1040,25 @@ public final class SelfTest {
                 && tech.getTags().contains("HDTV"));
         movies.core.FileNameParts movie = registry.detect("Se7en (1995).MVB.IMDB.en.mp4", registry.all());
         check("mvb parse movie", movie != null && "Se7en".equals(movie.getTitle()) && movie.getYear() == 1995);
+
+        // An MVB episode WITHOUT an episode title is still an episode (and
+        // re-parses to itself - no double marker on re-runs).
+        movies.core.FileNameParts bare = registry.detect("Big Little Lies - S01E06.MVB.IMDB.en.mp4", registry.all());
+        check("mvb parse bare episode", bare != null && "mvb".equals(bare.getConvention())
+                && bare.getSeason() == 1 && bare.getEpisode() == 6
+                && "Big Little Lies".equals(bare.getTitle()));
+        check("mvb rebuild is identity", "Big Little Lies - S01E06.MVB.IMDB.en.mp4".equals(
+                registry.get("mvb").build(bare)));
     }
 
     private static void testGroupMovies() throws IOException {
         File root = tempDir("group");
         String[] videos = { "The Flash S05E05 720P.mp4", "The Flash S05E05 1080P.mp4",
-                "Se7en 1964 720P.mp4", "Se7en 1964 1080P.mp4", "Lost S01E01 720P.mp4" };
+                "Se7en (1964) 720P.mp4", "Se7en (1964) 1080P.mp4", "Lost S01E01 720P.mp4" };
         for (String name : videos) IoUtil.writeText(touch(root, name), "");
         IoUtil.writeText(touch(root, "The Flash S05E05.en.srt"),
                 "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
-        IoUtil.writeText(touch(root, "Se7en 1964.en.srt"),
+        IoUtil.writeText(touch(root, "Se7en (1964).en.srt"),
                 "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
         IoUtil.writeText(touch(root, "Lost.S01E01.720p.WEB-DL.srt"),
                 "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
@@ -1078,10 +1089,10 @@ public final class SelfTest {
         check("group flash old sub gone", !new File(root, "The Flash S05E05.en.srt").exists());
 
         // Se7en folder likewise.
-        File se7en = new File(root, "Se7en 1964");
+        File se7en = new File(root, "Se7en (1964)");
         check("group se7en folder", se7en.isDirectory()
-                && new File(se7en, "Se7en 1964 720P.mp4").exists()
-                && new File(se7en, "Se7en 1964 1080P.mp4").exists());
+                && new File(se7en, "Se7en (1964) 720P.mp4").exists()
+                && new File(se7en, "Se7en (1964) 1080P.mp4").exists());
 
         // Lost: dotted sub with WEB-DL tag matches and is renamed to the video.
         File lost = new File(root, "Lost S01E01");
@@ -1147,25 +1158,75 @@ public final class SelfTest {
         // --- Already-grouped: a sub beside its video inside a folder is left
         // matched to THAT video (same-folder preference), not to another one.
         File root3 = tempDir("group-samedir");
-        File box = new File(root3, "Se7en 1964");
+        File box = new File(root3, "Se7en (1964)");
         IoUtil.mkdirs(box);
-        IoUtil.writeText(touch(box, "Se7en 1964 720P.mp4"), "");
-        IoUtil.writeText(touch(box, "Se7en 1964 1080P.mp4"), "");
-        IoUtil.writeText(touch(box, "Se7en 1964 720P.en.srt"),
+        IoUtil.writeText(touch(box, "Se7en (1964) 720P.mp4"), "");
+        IoUtil.writeText(touch(box, "Se7en (1964) 1080P.mp4"), "");
+        IoUtil.writeText(touch(box, "Se7en (1964) 720P.en.srt"),
                 "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
         OperationResult plan3 = grouper.plan(options(root3.getAbsolutePath()), null);
         boolean renamedToMatch = false;
         boolean videosMoved3 = false;
         for (TransferAction t : plan3.getTransfers()) {
             if (t.renamesVideo) videosMoved3 = true;
-            if (t.from.getName().equals("Se7en 1964 720P.en.srt")
-                    && t.to.getName().equals("Se7en 1964 720P.srt")
+            if (t.from.getName().equals("Se7en (1964) 720P.en.srt")
+                    && t.to.getName().equals("Se7en (1964) 720P.srt")
                     && t.state == TransferAction.State.PLANNED) renamedToMatch = true;
         }
         // The sub beside its (already grouped) videos matches THAT folder and
         // is renamed to drop its ".en" - exactly the report from the field.
         check("group-samedir sub renamed to match", renamedToMatch);
         check("group-samedir videos stay", !videosMoved3);
+    }
+
+    private static void testYearParsing() {
+        ConventionRegistry registry = new ConventionRegistry();
+
+        // Downfalls_High_2021_720P.mp4: year between title and quality.
+        FileNameParts dh = registry.detect("Downfalls_High_2021_720P.mp4", registry.all());
+        check("year dh detected", dh != null);
+        check("year dh title", "Downfalls High".equals(dh.getTitle()));
+        check("year dh year", dh.getYear() == 2021);
+        check("year dh quality", dh.getQuality() == 720);
+
+        // Big Little Lies 2017 S01 E06.mp4: year + SPACED episode marker.
+        FileNameParts bll = registry.detect("Big Little Lies 2017 S01 E06.mp4", registry.all());
+        check("year bll detected", bll != null);
+        check("year bll title", "Big Little Lies".equals(bll.getTitle()));
+        check("year bll year", bll.getYear() == 2017);
+        check("year bll s1e6", bll.getSeason() == 1 && bll.getEpisode() == 6);
+
+        // MVB with a year after the episode title.
+        FileNameParts mvb = registry.detect("Big Little Lies - 1x04 - Push Comes to Shove.2017.MVB.IMDB.en.mp4", registry.all());
+        check("year mvb detected", mvb != null);
+        check("year mvb title", "Big Little Lies".equals(mvb.getTitle()));
+        check("year mvb year", mvb.getYear() == 2017);
+        check("year mvb epTitle", "Push Comes to Shove".equals(mvb.getEpisodeTitle()));
+        check("year mvb s1e4", mvb.getSeason() == 1 && mvb.getEpisode() == 4);
+
+        // Keys: year and no-year variants of the same episode MUST match.
+        FileNameParts noYear = registry.detect("Big Little Lies S01E04.srt", registry.all());
+        check("year keys match", noYear != null && noYear.episodeKey().equals(mvb.episodeKey()));
+        check("year keys spaced", registry.detect("Big Little Lies 2017 S01 E06.mp4", registry.all())
+                .episodeKey().equals(bll.episodeKey()));
+
+        // Double year: release year after the title-year ("1917" the movie).
+        FileNameParts nine = registry.detect("1917 2019 720p.mp4", registry.all());
+        check("year 1917 title", nine != null && "1917".equals(nine.getTitle()));
+        check("year 1917 year", nine != null && nine.getYear() == 2019);
+
+        // MVB movie with a trailing year.
+        FileNameParts mvbMovie = registry.detect("Downfalls High 2021.MVB.IMDB.en.mp4", registry.all());
+        check("year mvb movie", mvbMovie != null && "Downfalls High".equals(mvbMovie.getTitle())
+                && mvbMovie.getYear() == 2021);
+
+        // TvSubtitles tail year.
+        FileNameParts tv = registry.detect("Show - 2x04 - Rebirth.2017.WEB.en.srt", registry.all());
+        check("year tvsubtitles", tv != null && "Rebirth".equals(tv.getEpisodeTitle()) && tv.getYear() == 2017);
+
+        // Build round trip keeps the year.
+        movies.core.conv.RegularConvention regular = new movies.core.conv.RegularConvention();
+        check("year regular build", "Downfalls High (2021) 720P.mp4".equals(regular.build(dh)));
     }
 
     private static void testFlatten() throws IOException {

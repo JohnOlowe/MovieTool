@@ -59,6 +59,8 @@ public class TvSubtitlesConvention extends AbstractConvention {
             if (token.trim().isEmpty()) continue;
             if (parts.getQuality() == 0 && qualityTokenValue(token) > 0) {
                 parts.setQuality(qualityTokenValue(token));
+            } else if (parts.getYear() == 0 && isYear(token.trim())) {
+                parts.setYear(Integer.parseInt(token.trim()));
             } else if (isLanguageToken(token.trim()) && parts.getLanguage().isEmpty()) {
                 parts.setLanguage(token.trim());
             } else {

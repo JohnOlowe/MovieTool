@@ -18,57 +18,41 @@ public final class NameResolver {
 
     private static final Pattern RAW_EPISODE = Pattern.compile("(?i)(?:^|[\\s.\\-_\\[])s(\\d{1,2})e(\\d{1,3})(?:[\\s.\\-_\\]]|$)");
 
-    private NameResolver() {
-    }
-
     /**
-     * Tries, in order: specific conventions on the file name, specific
-     * conventions on the parent and grandparent folder names, then the
-     * catch-all convention on the file name.
+     * Best interpretation of a file: every candidate parse - all selected
+     * conventions (site formats and the catch-all alike) on the FILE NAME,
+     * and the same on the parent and grandparent folder names (the old
+     * workflow where subtitles lived inside per-episode folders) - is
+     * scored, and the richest interpretation wins. A folder that names an
+     * episode beats a meaningless file-name parse ("something.en.srt"
+     * inside "Outer_Banks_S01_E01/"); a rich file-name parse beats a greedy
+     * site convention ("Downfalls_High_2021_720P.mp4" parses with year and
+     * quality). The file name wins exact ties with its folder.
      *
-     * @return parsed parts, or {@code null} when nothing matched
+     * @return parsed parts, or {@code null} when nothing matched anywhere
      */
     public static FileNameParts resolve(File file, ConventionRegistry registry, List<NamingConvention> selected) {
-        List<NamingConvention> specific = new ArrayList<NamingConvention>();
-        NamingConvention catchAll = null;
-        for (NamingConvention convention : selected) {
-            if ("regular".equals(convention.id())) catchAll = convention;
-            else specific.add(convention);
-        }
-
-        FileNameParts parts = detectAll(registry, file.getName(), specific);
-        if (parts != null) return parts;
+        FileNameParts best = ConventionRegistry.detectBest(file.getName(), selected);
+        int bestScore = best == null ? Integer.MIN_VALUE : ConventionRegistry.parseScore(best);
 
         File parent = file.getParentFile();
         for (int level = 0; level < 2 && parent != null; level++) {
-            FileNameParts folderParts = detectAll(registry, parent.getName(), specific);
+            FileNameParts folderParts = ConventionRegistry.detectBest(parent.getName(), selected);
             if (folderParts != null) {
                 FileNameParts copy = new FileNameParts(folderParts);
                 copy.setExtension(IoExtension.extensionOf(file.getName()));
                 copy.setOriginalName(file.getName());
-                return copy;
+                // Strict > : the file name wins exact ties with its folder.
+                if (ConventionRegistry.parseScore(copy) > bestScore) {
+                    bestScore = ConventionRegistry.parseScore(copy);
+                    best = copy;
+                }
             }
             parent = parent.getParentFile();
         }
-
-        if (catchAll != null) {
-            return catchAll.parse(file.getName());
-        }
-        return null;
+        return best;
     }
 
-    private static FileNameParts detectAll(ConventionRegistry registry, String name, List<NamingConvention> specific) {
-        for (NamingConvention convention : specific) {
-            FileNameParts parts = convention.parse(name);
-            if (parts != null) return parts;
-        }
-        return null;
-    }
-
-    /**
-     * Last-resort episode extraction from a raw name, used when no convention
-     * matched. Returns {season, episode} or null.
-     */
     public static int[] rawEpisode(String name) {
         Matcher m = RAW_EPISODE.matcher(name);
         if (m.find()) {

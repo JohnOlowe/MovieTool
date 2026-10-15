@@ -91,7 +91,10 @@ public class MovieGrouper {
         Map<File, FileNameParts> partsByVideo = new HashMap<File, FileNameParts>();
         for (File video : videos) {
             FileNameParts parts = NameResolver.resolve(video, registry, selected);
-            if (parts == null && options.isNameFromSubs()) {
+            // Borrow when the video has no episode identity at all (nothing
+            // parsed, or a parse that carried no season/episode - e.g. the
+            // name was just "S05E03.mp4" or junk inherited from a folder).
+            if ((parts == null || !parts.isEpisode()) && options.isNameFromSubs()) {
                 int[] raw = NameResolver.rawEpisode(video.getName());
                 FileNameParts donor = raw == null ? null : subDonors.get(raw[0] + "x" + raw[1]);
                 if (donor != null) {

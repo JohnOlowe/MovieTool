@@ -35,12 +35,14 @@ public abstract class AbstractConvention implements NamingConvention {
     protected static final class TechTail {
         public final String title;
         public final int quality;
+        public final int year;
         public final String language;
         public final List<String> tags = new ArrayList<String>();
 
-        TechTail(String title, int quality, String language, List<String> tags) {
+        TechTail(String title, int quality, int year, String language, List<String> tags) {
             this.title = title;
             this.quality = quality;
+            this.year = year;
             this.language = language;
             this.tags.addAll(tags);
         }
@@ -56,6 +58,7 @@ public abstract class AbstractConvention implements NamingConvention {
     protected static TechTail splitTechnicalTail(String fragment) {
         List<String> tags = new ArrayList<String>();
         int quality = 0;
+        int year = 0;
         String language = "";
         int end = fragment.length();
         while (end > 0) {
@@ -73,6 +76,9 @@ public abstract class AbstractConvention implements NamingConvention {
             boolean tech;
             if (quality == 0 && qualityTokenValue(token) > 0) {
                 quality = qualityTokenValue(token);
+                tech = true;
+            } else if (year == 0 && isYear(token)) {
+                year = Integer.parseInt(token);
                 tech = true;
             } else if (language.isEmpty() && isLanguageToken(t)) {
                 language = token;
@@ -92,7 +98,7 @@ public abstract class AbstractConvention implements NamingConvention {
             if (c == '.' || c == ' ' || c == '_' || c == '-') title = title.substring(0, title.length() - 1);
             else break;
         }
-        return new TechTail(title, quality, language, tags);
+        return new TechTail(title, quality, year, language, tags);
     }
 
     /** Parses "1080P", "720p" into 1080 / 720, or 0 when the token is not a quality. */

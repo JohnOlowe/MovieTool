@@ -73,6 +73,7 @@ public class AwafimConvention extends AbstractConvention {
         parts.setSeason(season);
         parts.setEpisode(episode);
         if (quality > 0) parts.setQuality(quality);
+        if (tail.year > 0) parts.setYear(tail.year);
         if (!tail.language.isEmpty()) parts.setLanguage(tail.language);
         parts.getTags().addAll(tail.tags);
         parts.setEpisodeTitle(underscoresToSpaces(episodeTitle));

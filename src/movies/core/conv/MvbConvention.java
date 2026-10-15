@@ -49,10 +49,10 @@ public class MvbConvention extends AbstractConvention {
         parts.setLanguage(language);
 
         String[] segments = head.split(" - ");
-        if (segments.length == 3) {
+        if (segments.length == 2 || segments.length == 3) {
             int[] se = parseMarker(segments[1].trim());
             String epFragment = segments.length > 2 ? segments[2] : "";
-            if (se != null && !epFragment.trim().isEmpty()) {
+            if (se != null) {
                 TechTail cut = splitTechnicalTail(epFragment.trim());
                 parts.setTitle(underscoresToSpaces(segments[0].trim()));
                 parts.setSeason(se[0]);
@@ -60,7 +60,9 @@ public class MvbConvention extends AbstractConvention {
                 parts.setEpisodeTitle(underscoresToSpaces(cut.title));
                 parts.getTags().addAll(cut.tags);
                 if (cut.quality > 0) parts.setQuality(cut.quality);
+                if (cut.year > 0) parts.setYear(cut.year);
                 return parts;
+                // (an episode without an episode title is fine: "Show - S01E06.MVB.IMDB.en.mp4")
             }
         }
         // Movie (or unrecognised structure): the whole head is the title.
@@ -70,7 +72,12 @@ public class MvbConvention extends AbstractConvention {
         for (String group : groups) {
             if (isYear(group.trim())) parts.setYear(Integer.parseInt(group.trim()));
         }
-        parts.setTitle(cleaned);
+        // A trailing year (or quality) outside parentheses is still not part
+        // of the title: "Downfalls High 2021 720P" -> title + year + quality.
+        TechTail cut = splitTechnicalTail(cleaned);
+        if (parts.getYear() == 0 && cut.year > 0) parts.setYear(cut.year);
+        if (parts.getQuality() == 0 && cut.quality > 0) parts.setQuality(cut.quality);
+        parts.setTitle(cut.title);
         return parts;
     }
 
