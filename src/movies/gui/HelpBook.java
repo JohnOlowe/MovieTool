@@ -72,6 +72,12 @@ final class HelpBook {
                 + "<font face=\"monospace\">The Flash - S05E05 - Running Ahead.MVB.IMDB.en.mp4</font> "
                 + "(movies: <font face=\"monospace\">Se7en.MVB.IMDB.en.mp4</font>) - no custom pattern "
                 + "needed. Already-MVB-named files are recognised and left alone.</p>");
+        sb.append("<p><b>Quick patterns</b> (the dropdown on the card) fill the pattern field for you, "
+                + "and a <b>live preview</b> shows a real episode and a real movie name as you type. "
+                + "Empty tokens never leave stray separators behind: <font face=\"monospace\">{title} - {s01e01} - "
+                + "{episodeTitle}{ext}</font> on a movie is just <font face=\"monospace\">Title.mp4</font> - no "
+                + "leftover dashes or dots. The same tokens also work in the IMDB rename <b>tag</b> field, "
+                + "resolved per episode.</p>");
         sb.append("<p><b>Custom pattern tokens</b> (case-insensitive; leave out what you do not "
                 + "want - empty tokens and their spaces are cleaned up automatically):</p>"
                 + "<table cellpadding=\"3\">"

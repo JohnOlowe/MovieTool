@@ -2,6 +2,7 @@ package movies.core.conv;
 
 import movies.core.FileNameParts;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -49,18 +50,32 @@ public class MvbConvention extends AbstractConvention {
         parts.setLanguage(language);
 
         String[] segments = head.split(" - ");
-        if (segments.length == 2 || segments.length == 3) {
+        if (segments.length >= 2) {
             int[] se = parseMarker(segments[1].trim());
-            String epFragment = segments.length > 2 ? segments[2] : "";
             if (se != null) {
-                TechTail cut = splitTechnicalTail(epFragment.trim());
+                // Extra " - " segments belong to the episode title, except a
+                // trailing pure year ("Show - 2x01 - Title - 2019").
+                List<String> epParts = new ArrayList<String>();
+                for (int i = 2; i < segments.length; i++) epParts.add(segments[i].trim());
+                int year = 0;
+                if (!epParts.isEmpty() && isYear(epParts.get(epParts.size() - 1).trim())) {
+                    year = Integer.parseInt(epParts.get(epParts.size() - 1).trim());
+                    epParts.remove(epParts.size() - 1);
+                }
+                StringBuilder fragment = new StringBuilder();
+                for (String part : epParts) {
+                    if (fragment.length() > 0) fragment.append(" - ");
+                    fragment.append(part);
+                }
+                TechTail cut = splitTechnicalTail(fragment.toString().trim());
                 parts.setTitle(underscoresToSpaces(segments[0].trim()));
                 parts.setSeason(se[0]);
                 parts.setEpisode(se[1]);
                 parts.setEpisodeTitle(underscoresToSpaces(cut.title));
                 parts.getTags().addAll(cut.tags);
                 if (cut.quality > 0) parts.setQuality(cut.quality);
-                if (cut.year > 0) parts.setYear(cut.year);
+                if (year > 0) parts.setYear(year);
+                else if (cut.year > 0) parts.setYear(cut.year);
                 return parts;
                 // (an episode without an episode title is fine: "Show - S01E06.MVB.IMDB.en.mp4")
             }

@@ -190,7 +190,9 @@ final class Cards {
         private final Form form = new Form();
         private final JTextField dir = form.addPathField("Folder:", true);
         private final JComboBox<String> target = new JComboBox<String>();
+        private final JComboBox<String> presets = new JComboBox<String>();
         private final JTextField pattern = form.addTextField("Or custom pattern:", "{title} {s01e01}{ext} - tokens in Help");
+        private final JLabel patternPreview = new JLabel("");
         private final JTextField conventions = form.addTextField("Only detect:", "e.g. moviebox,awafim (blank = all)");
         private final JCheckBox recursive = form.addCheckbox("Include sub-folders", false);
         private final JCheckBox nameFromSubs = form.addCheckbox("Nameless videos take the name of their episode's subtitle", false);
@@ -200,12 +202,49 @@ final class Cards {
         private volatile RenameEngine.RenamePlan plan;
 
         RenameCard() {
-            super("Rename", "Rename videos and subtitles to a naming convention or a custom pattern.");
+            super("Rename", "Rename videos and subtitles to a naming convention, a quick preset, or your own pattern - with a live preview as you type.");
             target.addItem("(custom pattern)");
             for (movies.core.NamingConvention convention : registry.all()) {
                 target.addItem(convention.id() + "  -  " + convention.example());
             }
             form.addRow("Rename to:", target, null);
+            presets.addItem("Quick patterns:");
+            presets.addItem("{title} - {s01e01} - {episodeTitle}{ext}");
+            presets.addItem("{title} {s01e01}{ext}");
+            presets.addItem("{title} - {1x01} - {episodeTitle}{ext}");
+            presets.addItem("{title} ({year}){ext}");
+            presets.addItem("{title} ({year}) - {s01e01}{ext}");
+            presets.addItem("{title}.{s01e01}.{quality}{ext}");
+            presets.addItem("{original} {quality}{ext}");
+            presets.addActionListener(new java.awt.event.ActionListener() {
+                @Override
+                public void actionPerformed(java.awt.event.ActionEvent event) {
+                    Object chosen = presets.getSelectedItem();
+                    if (chosen != null && String.valueOf(chosen).contains("{")) {
+                        pattern.setText(String.valueOf(chosen));
+                        updatePreview();
+                    }
+                }
+            });
+            form.addRow("Quick patterns:", presets, null);
+            javax.swing.event.DocumentListener previewRefresh = new javax.swing.event.DocumentListener() {
+                @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { updatePreview(); }
+                @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { updatePreview(); }
+                @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { updatePreview(); }
+            };
+            pattern.getDocument().addDocumentListener(previewRefresh);
+            form.addRow("Live preview:", patternPreview, null);
+            updatePreview();
+        }
+
+        private void updatePreview() {
+            try {
+                patternPreview.setText(RenameEngine.PatternBuilder.preview(pattern.getText().trim()));
+                patternPreview.setForeground(new java.awt.Color(40, 110, 40));
+            } catch (RuntimeException broken) {
+                patternPreview.setText("(pattern preview unavailable)");
+                patternPreview.setForeground(new java.awt.Color(150, 60, 60));
+            }
         }
 
         @Override

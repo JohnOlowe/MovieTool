@@ -223,9 +223,15 @@ public class RenameEngine {
                 i = close;
             }
             return sb.toString()
+                    .replaceAll("(?:\\s*-\\s*)+\\.", ".")   // dash(es) directly before the extension
                     .replaceAll("\\s+\\.", ".")      // no space before the extension
                     .replaceAll("\\(\\s*\\)", "")      // () groups emptied by tokens
+                    .replaceAll("\\.{2,}", ".")      // dots left behind by empty tokens
+                    .replaceAll("(?:\\s*-\\s*){2,}", " - ") // dash runs left by empty tokens
+                    .replaceAll("\\s*-\\s*$", "")    // trailing lone dash
+                    .replaceAll("^\\s*-\\s*", "")    // leading lone dash
                     .replaceAll("\\s{2,}", " ")      // collapse gaps left by empty tokens
+                    .replaceAll("[. ]+$", "")        // stray dot/space at the end (never the extension)
                     .trim();
         }
 
@@ -244,6 +250,36 @@ public class RenameEngine {
             if ("s1e1".equals(t)) return p.isEpisode() ? p.getSeason() + "E" + p.getEpisode() : "";
             if ("1x01".equals(t)) return p.isEpisode() ? p.getSeason() + "x" + pad2(p.getEpisode()) : "";
             return "{" + token + "}";
+        }
+
+        /**
+         * Live-preview text for a pattern, built from a representative
+         * episode and a representative movie. Used by the GUI as the user
+         * types; same pipeline as a real rename (build + sanitise).
+         */
+        public static String preview(String pattern) {
+            FileNameParts episode = new FileNameParts();
+            episode.setTitle("The Flash");
+            episode.setYear(2021);
+            episode.setSeason(5);
+            episode.setEpisode(3);
+            episode.setEpisodeTitle("Running Ahead");
+            episode.setQuality(720);
+            episode.setLanguage("en");
+            episode.setExtension(".mp4");
+            episode.setOriginalName("the_flash_s05e03_720p.mp4");
+            String sample = NameSanitizer.sanitize(build(pattern, episode), "");
+            FileNameParts movie = new FileNameParts();
+            movie.setTitle("Downfalls High");
+            movie.setYear(2021);
+            movie.setQuality(720);
+            movie.setExtension(".mp4");
+            movie.setOriginalName("downfalls_high_2021_720p.mp4");
+            String movieSample = NameSanitizer.sanitize(build(pattern, movie), "");
+            if (!movieSample.equals(sample)) {
+                return sample + "   |   movie: " + movieSample;
+            }
+            return sample;
         }
 
         private static String pad2(int n) { return n < 10 ? "0" + n : Integer.toString(n); }

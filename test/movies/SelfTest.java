@@ -62,6 +62,7 @@ public final class SelfTest {
         testGroupMovies();
         testGroupRenameAndBorrow();
         testYearParsing();
+        testDashYearAndPatterns();
         testSanitizer();
         testRename();
         testImdbRename();
@@ -1227,6 +1228,51 @@ public final class SelfTest {
         // Build round trip keeps the year.
         movies.core.conv.RegularConvention regular = new movies.core.conv.RegularConvention();
         check("year regular build", "Downfalls High (2021) 720P.mp4".equals(regular.build(dh)));
+    }
+
+    private static void testDashYearAndPatterns() {
+        ConventionRegistry registry = new ConventionRegistry();
+
+        // The user's dash-year name.
+        FileNameParts parts = registry.detect("Big_Little_Lies - 2x01 - What Have They Done - 2019.MVB.IMDB.en.mp4", registry.all());
+        check("dashyear mvb", parts != null && "mvb".equals(parts.getConvention()));
+        check("dashyear title", "Big Little Lies".equals(parts.getTitle()));
+        check("dashyear s2e1", parts.getSeason() == 2 && parts.getEpisode() == 1);
+        check("dashyear epTitle", "What Have They Done".equals(parts.getEpisodeTitle()));
+        check("dashyear year", parts.getYear() == 2019);
+        check("dashyear lang", "en".equals(parts.getLanguage()));
+        check("dashyear build", "Big Little Lies - S02E01 - What Have They Done.MVB.IMDB.en.mp4".equals(
+                registry.get("mvb").build(parts)));
+
+        // Patterns never leave dangling separators when tokens are empty.
+        FileNameParts movie = new FileNameParts();
+        movie.setTitle("Downfalls High");
+        movie.setExtension(".mp4");
+        movie.setOriginalName("downfalls_high.mp4");
+        check("clean movie dashes", "Downfalls High.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} - {s01e01} - {episodeTitle}{ext}", movie)));
+        check("clean movie dots", "Downfalls High.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title}.{episodeTitle}{ext}", movie)));
+        FileNameParts yearMovie = new FileNameParts();
+        yearMovie.setTitle("Downfalls High");
+        yearMovie.setYear(2021);
+        yearMovie.setExtension(".mp4");
+        yearMovie.setOriginalName("downfalls_high_2021.mp4");
+        check("clean year dash", "Downfalls High - 2021.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} - {s01e01} - {year}{ext}", yearMovie)));
+        check("clean trailing dash", "Downfalls High.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title} - {episodeTitle}{ext}", yearMovie)));
+        check("clean tag dots year", "Downfalls High.2021.MVB.IMDB.en.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title}.{year}.MVB.IMDB.en{ext}", yearMovie)));
+        check("clean empty token dots", "Downfalls High.MVB.IMDB.en.mp4".equals(
+                RenameEngine.PatternBuilder.build("{title}.{year}.MVB.IMDB.en{ext}", movie)));
+
+        // Live preview text.
+        String preview = RenameEngine.PatternBuilder.preview("{title} - {s01e01} - {episodeTitle}{ext}");
+        check("preview episode", preview.startsWith("The Flash - S05E03 - Running Ahead.mp4"));
+        check("preview movie variant", preview.contains("Downfalls High.mp4"));
+        String moviePreview = RenameEngine.PatternBuilder.preview("{title} ({year}){ext}");
+        check("preview movie shown", moviePreview.contains("Downfalls High (2021).mp4"));
     }
 
     private static void testFlatten() throws IOException {

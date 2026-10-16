@@ -7,6 +7,7 @@ import movies.core.NameSanitizer;
 import movies.core.NamingConvention;
 import movies.core.OperationResult;
 import movies.core.Options;
+import movies.core.RenameEngine;
 import movies.core.Problem;
 import movies.core.TransferAction;
 import movies.util.IoUtil;
@@ -255,7 +256,18 @@ public class ImdbRename {
             String title = NameSanitizer.sanitize(entry.title, options.getReplaceWith());
             if (title.isEmpty()) title = "Episode " + entry.episode;
             String base = NameSanitizer.sanitize(show + " - " + marker + " - " + title, options.getReplaceWith());
-            String tag = NameSanitizer.sanitize(options.getTag(), options.getReplaceWith());
+            // The tag may use the general tokens ({title}, {s01e01},
+            // {episodeTitle}, ...) resolved per episode - a literal tag
+            // (the default "MVB.IMDB.en") passes through unchanged.
+            movies.core.FileNameParts tagParts = new movies.core.FileNameParts();
+            tagParts.setTitle(show);
+            tagParts.setSeason(entry.season);
+            tagParts.setEpisode(entry.episode);
+            tagParts.setEpisodeTitle(entry.title);
+            tagParts.setExtension(".tmp");
+            String tag = RenameEngine.PatternBuilder.build(options.getTag(), tagParts);
+            tag = NameSanitizer.sanitize(tag, options.getReplaceWith());
+            tag = tag.endsWith(".tmp") ? tag.substring(0, tag.length() - 4) : tag;
             if (!tag.isEmpty()) base = base + "." + tag;
 
             if (video != null) {
